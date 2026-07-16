@@ -1,4 +1,4 @@
-name: Rodar Script Diário - TikTok competitors
+name: Script - TikTok competitors
 
 on:
   schedule:
