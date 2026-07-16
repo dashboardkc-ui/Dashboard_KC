@@ -1,4 +1,4 @@
-name: Rodar Script Diário - Organic Automation
+name: Script - Organic Automation
 
 on:
   schedule:
