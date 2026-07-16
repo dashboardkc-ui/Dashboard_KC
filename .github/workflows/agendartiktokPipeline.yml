@@ -1,4 +1,4 @@
-name: Rodar Script Diário - TikTok Profile
+name: Script - TikTok Profile
 
 on:
   schedule:
