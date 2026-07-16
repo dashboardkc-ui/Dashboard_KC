@@ -1,4 +1,4 @@
-name: Rodar Script Diário - TikTok hashtag
+name: Script - TikTok hashtag
 
 on:
   schedule:
