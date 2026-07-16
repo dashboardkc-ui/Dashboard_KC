@@ -1,4 +1,4 @@
-name: Rodar Script Diário - Instagram Post
+name: Script - Instagram Post
 
 on:
   schedule:
