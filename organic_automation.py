@@ -258,6 +258,10 @@ def read_organic_sheet(local_path, baseline_df):
         if row["Video Views (SUM)"] != 0 else 0,
         axis=1,
     )
+    # Converte para porcentagem (ex.: 5.23 representando 5,23%) já aqui,
+    # antes do cálculo do Delta, porque a Baseline Engagement Rate também
+    # vem em porcentagem — as duas precisam estar na mesma escala.
+    df["Engagement Rate"] = df["Engagement Rate"] * 100
 
     def safe_pct(row, numerator_col):
         total = (
@@ -272,14 +276,24 @@ def read_organic_sheet(local_path, baseline_df):
     df["Sent. Negativo (%)"] = df.apply(lambda r: safe_pct(r, "Count of Negative Comments (SUM)"), axis=1)
     df["Sent. Positivo (%)"] = df.apply(lambda r: safe_pct(r, "Count of Positive Comments (SUM)"), axis=1)
     df["Sent. Neutro (%)"] = df.apply(lambda r: safe_pct(r, "Count of Neutral Comments (SUM)"), axis=1)
+    # Converte para porcentagem já aqui (mesma lógica do Engagement Rate),
+    # porque a Baseline Neg. Com. também vem em porcentagem e o Delta
+    # abaixo precisa das duas colunas na mesma escala.
+    df["Sent. Negativo (%)"] = df["Sent. Negativo (%)"] * 100
+    df["Sent. Positivo (%)"] = df["Sent. Positivo (%)"] * 100
+    df["Sent. Neutro (%)"] = df["Sent. Neutro (%)"] * 100
     df["Concatenate"] = (
         df[["Account", "Country of Origin (Account)", "Outbound Message Category"]]
         .fillna("")
         .agg("".join, axis=1)
     )
     df = df.merge(baseline_df, on="Concatenate", how="left")
-    df["Delta Eng. Rate (p.p.)"] = (df["Engagement Rate"] - df["Baseline Engagement Rate"]) * 100
-    df["Delta Neg. Sent. (p.p.)"] = (df["Sent. Negativo (%)"] - df["Baseline Neg. Com."]) * 100
+    # Engagement Rate e Baseline Engagement Rate já estão na mesma escala
+    # (porcentagem), então o Delta é a subtração direta, sem *100.
+    df["Delta Eng. Rate (p.p.)"] = df["Engagement Rate"] - df["Baseline Engagement Rate"]
+    # Sent. Negativo (%) e Baseline Neg. Com. também já estão na mesma escala
+    # (porcentagem), então o Delta é a subtração direta, sem *100.
+    df["Delta Neg. Sent. (p.p.)"] = df["Sent. Negativo (%)"] - df["Baseline Neg. Com."]
     df["Accionable"] = df.apply(classify_boost, axis=1)
     if "Published Date" in df.columns:
         df["Published Date"] = pd.to_datetime(df["Published Date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
