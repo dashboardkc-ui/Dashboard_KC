@@ -718,12 +718,27 @@ def main():
         print(f"{'=' * 60}")
 
         try:
-            # Busca dados do perfil
-            print(f"  Buscando perfil de @{username}...")
-            profile_data = fetch_profile(username)
-
-            # Busca caption, comentários e métricas do post
+            # Busca primeiro o caption, comentários e métricas do post.
+            # O post-info retorna o "dono" real do post (post_meta['username_shared']),
+            # que é o handle correto do Instagram — diferente do "username" da planilha,
+            # que pode estar com typo, nome de exibição, espaços etc.
             caption, all_comments, post_meta = fetch_post_info(shortcode)
+
+            real_handle = (post_meta.get("username_shared") or "").strip()
+
+            if real_handle:
+                if real_handle != username:
+                    print(f"  Aviso: username da planilha ('{username}') difere do "
+                          f"handle real do post ('{real_handle}'). Usando o handle real.")
+                handle_to_fetch = real_handle
+            else:
+                print(f"  Aviso: post-info não retornou o handle do dono do post. "
+                      f"Usando o username da planilha ('{username}') como fallback.")
+                handle_to_fetch = username
+
+            # Busca dados do perfil usando o handle correto
+            print(f"  Buscando perfil de @{handle_to_fetch}...")
+            profile_data = fetch_profile(handle_to_fetch)
 
             if caption:
                 print(f"  Caption: {caption[:100]}{'...' if len(caption) > 100 else ''}")
