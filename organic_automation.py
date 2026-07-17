@@ -52,6 +52,7 @@ RAW_COLUMNS_NEEDED = [
     "Count of Negative Comments (SUM)",
     "Post Shares (SUM)",
     "Post Likes And Reactions (SUM)",
+    "Is Sponsored", 
 ]
 BASELINE_COLUMNS_MAP = {
     "Engagement Rate": "Baseline Engagement Rate",
