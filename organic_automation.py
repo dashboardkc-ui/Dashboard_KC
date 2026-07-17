@@ -53,6 +53,7 @@ RAW_COLUMNS_NEEDED = [
     "Post Shares (SUM)",
     "Post Likes And Reactions (SUM)",
     "Is Sponsored", 
+    "TikTok Video Views (SUM)"
 ]
 BASELINE_COLUMNS_MAP = {
     "Engagement Rate": "Baseline Engagement Rate",
