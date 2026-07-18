@@ -111,26 +111,14 @@ def extrair_retry_seconds(error_str):
 
 
 def classify_comments_batch(client, comments_text):
-    # 1. We update the prompt to explicitly define the expected JSON schema
     prompt = (
     """Você é um especialista em análise de sentimentos para redes sociais.
     Sua tarefa é classificar comentários em 'promotor', 'neutro' ou 'detrator'.
 
     REGRAS CRÍTICAS:
-    1. Existe comentário neutro...
-    2. Se o comentário for positivo...
-    3. Se houver qualquer reclamação...
-
-    RETORNO OBRIGATÓRIO:
-    Você deve responder APENAS com um array JSON contendo objetos correspondentes a cada comentário na mesma ordem recebida. 
-    Cada objeto deve ter exatamente as chaves "classification" e "classification_reason".
-    Não adicione saudações, explicações ou introduções fora do formato JSON.
-
-    Exemplo de formato esperado:
-    [
-      {"classification": "promotor", "classification_reason": "Elogiou o produto explicitamente."},
-      {"classification": "neutro", "classification_reason": "Apenas marcou outro perfil nos comentários."}
-    ]
+    1. Existe comentário neutro, então caso você acredite que não seja nem detrator e nem promotor pode usar essa classificação.
+    2. Se o comentário for positivo, elogio ou neutro-positivo (ex: "ok", "gostei", emojis), classifique como 'promotor'.
+    3. Se houver qualquer reclamação, dúvida técnica, ironia ou crítica, classifique como 'detrator'.
 
     Comentários para análise:
     """
@@ -138,20 +126,42 @@ def classify_comments_batch(client, comments_text):
     for i, text in enumerate(comments_text):
         prompt += f"{i+1}. {text}\n"
 
+    # Criando o esquema estrito idêntico à estratégia do seu código que funciona
+    schema = {
+        "type": "object",
+        "properties": {
+            "results": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "classification": {
+                            "type": "string",
+                            "enum": ["promotor", "neutro", "detrator"]
+                        },
+                        "classification_reason": {"type": "string"}
+                    },
+                    "required": ["classification", "classification_reason"]
+                }
+            }
+        },
+        "required": ["results"]
+    }
+
     for attempt in range(1, GEMINI_MAX_RETRY + 1):
         try:
-            # 2. Enforce JSON output by using response_mime_type inside config
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
-                config={"response_mime_type": "application/json"}
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=schema,
+                    temperature=0.1
+                )
             )
-            raw = response.text.strip()
-            
-            # Keep the regex safety net just in case, though response_mime_type usually eliminates markdown blocks
-            raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
-            return json.loads(raw)
-            
+            # Retorna diretamente a lista extraída do objeto estruturado
+            return json.loads(response.text)["results"]
+
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
@@ -164,9 +174,10 @@ def classify_comments_batch(client, comments_text):
                     return [{"classification": "FALHA_API", "classification_reason": "rate limit"} for _ in comments_text]
             else:
                 print(f"    Erro no Gemini: {e}", flush=True)
+                # Garante que o erro real seja capturado sem quebrar o pipeline do dataframe
                 return [{"classification": "ERRO", "classification_reason": str(e)} for _ in comments_text]
 
-# ==============================
+
 # ETAPA 1 — LER POSTS DA PLANILHA
 # ==============================
 
