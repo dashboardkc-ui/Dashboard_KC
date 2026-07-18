@@ -6,6 +6,7 @@ import requests
 import pandas as pd
 from datetime import datetime, timezone
 from google import genai
+from google.genai import types
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -27,7 +28,7 @@ TAB_TT_DATA_POST     = "tt_data_post_post"
 API_BASE         = "https://api.sociavault.com/v1/scrape/tiktok"
 POST_MAX_DAYS    = 14
 GEMINI_BATCH     = 20
-GEMINI_MAX_RETRY = 2
+GEMINI_MAX_RETRY = 3
 COMMENTS_LIMIT   = 100
 
 # ==============================
@@ -97,7 +98,15 @@ def sv_get(endpoint, params, timeout=60):
         timeout=timeout
     )
     resp.raise_for_status()
-    return resp.json()
+    try:
+        return resp.json()
+    except ValueError:
+        raise ValueError(
+            f"SociaVault /{endpoint} retornou corpo não-JSON "
+            f"(status={resp.status_code}, content-type={resp.headers.get('Content-Type')}, "
+            f"body[:200]={resp.text[:200]!r})"
+        )
+ 
 
 # ==============================
 # GEMINI HELPERS
@@ -110,23 +119,40 @@ def extrair_retry_seconds(error_str):
     return 60.0
 
 
-def classify_comments_batch(client, comments_text):
-    prompt = (
-    """Você é um especialista em análise de sentimentos para redes sociais.
-    Sua tarefa é classificar comentários em 'promotor', 'neutro' ou 'detrator'.
-
-    REGRAS CRÍTICAS:
-    1. Existe comentário neutro, então caso você acredite que não seja nem detrator e nem promotor pode usar essa classificação.
-    2. Se o comentário for positivo, elogio ou neutro-positivo (ex: "ok", "gostei", emojis), classifique como 'promotor'.
-    3. Se houver qualquer reclamação, dúvida técnica, ironia ou crítica, classifique como 'detrator'.
-
-    Comentários para análise:
-    """
+def _extract_response_text(response):
+    """FIX 2: nunca chamar json.loads direto em response.text.
+    Valida se o Gemini realmente retornou conteúdo e, se não, explica o porquê."""
+    text = (response.text or "").strip() if response is not None else ""
+    if text:
+        return text
+    finish_reason = None
+    block_reason = None
+    if getattr(response, "candidates", None):
+        finish_reason = getattr(response.candidates[0], "finish_reason", None)
+    if getattr(response, "prompt_feedback", None):
+        block_reason = getattr(response.prompt_feedback, "block_reason", None)
+    raise ValueError(
+        f"Gemini retornou resposta vazia (finish_reason={finish_reason}, "
+        f"block_reason={block_reason})"
     )
-    for i, text in enumerate(comments_text):
-        prompt += f"{i+1}. {text}\n"
-
-    # Criando o esquema estrito idêntico à estratégia do seu código que funciona
+ 
+ 
+def classify_comments_batch(client, comments):
+    """Recebe lista de dicts {"n": int, "text": str}.
+    FIX 4: envia IDs explícitos (como no script 1) em vez de depender da ordem."""
+    prompt = f"""Você é um especialista em análise de sentimentos para redes sociais.
+Sua tarefa é classificar comentários em 'promotor', 'neutro' ou 'detrator'.
+ 
+REGRAS CRÍTICAS:
+1. Existe comentário neutro, então caso você acredite que não seja nem detrator e nem promotor pode usar essa classificação.
+2. Se o comentário for positivo, elogio ou neutro-positivo (ex: "ok", "gostei", emojis), classifique como 'promotor'.
+3. Se houver qualquer reclamação, dúvida técnica, ironia ou crítica, classifique como 'detrator'.
+4. Retorne exatamente um resultado por comentário, com o mesmo "n" recebido.
+ 
+Comentários para análise:
+{json.dumps(comments, ensure_ascii=False)}
+"""
+ 
     schema = {
         "type": "object",
         "properties": {
@@ -135,19 +161,21 @@ def classify_comments_batch(client, comments_text):
                 "items": {
                     "type": "object",
                     "properties": {
+                        "n": {"type": "integer"},
                         "classification": {
                             "type": "string",
                             "enum": ["promotor", "neutro", "detrator"]
                         },
                         "classification_reason": {"type": "string"}
                     },
-                    "required": ["classification", "classification_reason"]
+                    "required": ["n", "classification", "classification_reason"]
                 }
             }
         },
         "required": ["results"]
     }
-
+ 
+    last_err = None
     for attempt in range(1, GEMINI_MAX_RETRY + 1):
         try:
             response = client.models.generate_content(
@@ -156,26 +184,39 @@ def classify_comments_batch(client, comments_text):
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_json_schema=schema,
-                    temperature=0.1
+                    temperature=0.1,
+                    # FIX 5: gemini-2.5-flash é modelo "thinking" — sem limite,
+                    # ele pode gastar todo o budget pensando e devolver texto
+                    # vazio => "Expecting value: line 1 column 1 (char 0)".
+                    max_output_tokens=8192,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
                 )
             )
-            # Retorna diretamente a lista extraída do objeto estruturado
-            return json.loads(response.text)["results"]
-
+            raw = _extract_response_text(response)
+            results = json.loads(raw)["results"]
+            # Reindexa por "n" para garantir alinhamento
+            return {int(r["n"]): r for r in results}
+ 
         except Exception as e:
             err_str = str(e)
+            last_err = err_str
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
                 wait = extrair_retry_seconds(err_str)
                 if attempt < GEMINI_MAX_RETRY:
-                    print(f"    Rate limit atingido. Aguardando {wait:.0f}s antes de tentar novamente (tentativa {attempt}/{GEMINI_MAX_RETRY})...", flush=True)
+                    print(f"    Rate limit atingido. Aguardando {wait:.0f}s (tentativa {attempt}/{GEMINI_MAX_RETRY})...", flush=True)
                     time.sleep(wait)
-                else:
-                    print(f"    Rate limit após {GEMINI_MAX_RETRY} tentativas. Marcando lote como FALHA_API.", flush=True)
-                    return [{"classification": "FALHA_API", "classification_reason": "rate limit"} for _ in comments_text]
-            else:
-                print(f"    Erro no Gemini: {e}", flush=True)
-                # Garante que o erro real seja capturado sem quebrar o pipeline do dataframe
-                return [{"classification": "ERRO", "classification_reason": str(e)} for _ in comments_text]
+                    continue
+                print(f"    Rate limit após {GEMINI_MAX_RETRY} tentativas. Marcando lote como FALHA_API.", flush=True)
+                return {c["n"]: {"n": c["n"], "classification": "FALHA_API", "classification_reason": "rate limit"} for c in comments}
+            # FIX 6: resposta vazia / JSON truncado agora também é retryable
+            if isinstance(e, (ValueError, json.JSONDecodeError, KeyError)) and attempt < GEMINI_MAX_RETRY:
+                print(f"    Resposta inválida do Gemini ({e}). Repetindo em 5s (tentativa {attempt}/{GEMINI_MAX_RETRY})...", flush=True)
+                time.sleep(5)
+                continue
+            print(f"    Erro no Gemini: {e}", flush=True)
+            return {c["n"]: {"n": c["n"], "classification": "ERRO", "classification_reason": err_str} for c in comments}
+ 
+    return {c["n"]: {"n": c["n"], "classification": "ERRO", "classification_reason": last_err or "sem resposta"} for c in comments}
 
 
 # ETAPA 1 — LER POSTS DA PLANILHA
@@ -387,16 +428,20 @@ def processar_comentarios(service, client, post, existing_ids):
 
     all_rows = []
     for i in range(0, len(novos), GEMINI_BATCH):
-        lote   = novos[i:i + GEMINI_BATCH]
-        textos = [c.get("text", c.get("comment", "")) for c in lote]
+        lote = novos[i:i + GEMINI_BATCH]
+        # FIX 4: manda id explícito por comentário, igual à estratégia do script 1
+        payload = [
+            {"n": j, "text": str(c.get("text", c.get("comment", "")))}
+            for j, c in enumerate(lote)
+        ]
         print(f"    Classificando lote {i // GEMINI_BATCH + 1}...", flush=True)
-        classificacoes = classify_comments_batch(client, textos)
-
+        classificacoes = classify_comments_batch(client, payload)  # dict {n: resultado}
+ 
         for j, c in enumerate(lote):
-            clf    = classificacoes[j] if j < len(classificacoes) else {"classification": "ERRO", "classification_reason": "sem resposta"}
+            clf    = classificacoes.get(j, {"classification": "ERRO", "classification_reason": "sem resposta"})
             c_user = c.get("user", {})
             cid    = str(c.get("cid", c.get("comment_id", c.get("id", ""))))
-
+ 
             row = {
                 "comment_id":            cid,
                 "video_id":              video_id,
@@ -413,15 +458,16 @@ def processar_comentarios(service, client, post, existing_ids):
                 "video_url":             video_url
             }
             all_rows.append(row)
-            existing_ids.add(cid)  # atualiza deduplicação em memória
-
+            existing_ids.add(cid)
+ 
         time.sleep(2)
-
+ 
     if all_rows:
         df_comments = pd.DataFrame(all_rows)[COMMENT_COLS]
+        df_comments = df_comments.fillna("").astype(str)
         append_to_sheet(service, SHEET_TT_DATA_COMMENTS_ID, TAB_TT_DATA_COMMENTS, df_comments)
         print(f"    {len(all_rows)} comentário(s) salvo(s) para vídeo {video_id}.", flush=True)
-
+ 
     return len(all_rows)
 
 # ==============================
