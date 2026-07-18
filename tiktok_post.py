@@ -111,6 +111,7 @@ def extrair_retry_seconds(error_str):
 
 
 def classify_comments_batch(client, comments_text):
+    # 1. We update the prompt to explicitly define the expected JSON schema
     prompt = (
     """Você é um especialista em análise de sentimentos para redes sociais.
     Sua tarefa é classificar comentários em 'promotor', 'neutro' ou 'detrator'.
@@ -120,6 +121,17 @@ def classify_comments_batch(client, comments_text):
     2. Se o comentário for positivo...
     3. Se houver qualquer reclamação...
 
+    RETORNO OBRIGATÓRIO:
+    Você deve responder APENAS com um array JSON contendo objetos correspondentes a cada comentário na mesma ordem recebida. 
+    Cada objeto deve ter exatamente as chaves "classification" e "classification_reason".
+    Não adicione saudações, explicações ou introduções fora do formato JSON.
+
+    Exemplo de formato esperado:
+    [
+      {"classification": "promotor", "classification_reason": "Elogiou o produto explicitamente."},
+      {"classification": "neutro", "classification_reason": "Apenas marcou outro perfil nos comentários."}
+    ]
+
     Comentários para análise:
     """
     )
@@ -128,13 +140,18 @@ def classify_comments_batch(client, comments_text):
 
     for attempt in range(1, GEMINI_MAX_RETRY + 1):
         try:
+            # 2. Enforce JSON output by using response_mime_type inside config
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
-                contents=prompt
+                contents=prompt,
+                config={"response_mime_type": "application/json"}
             )
             raw = response.text.strip()
+            
+            # Keep the regex safety net just in case, though response_mime_type usually eliminates markdown blocks
             raw = re.sub(r"^```json|^```|```$", "", raw, flags=re.MULTILINE).strip()
             return json.loads(raw)
+            
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
