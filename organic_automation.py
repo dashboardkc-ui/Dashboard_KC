@@ -256,12 +256,44 @@ def read_organic_sheet(local_path, baseline_df):
     df["Organic_ID"] = df.apply(extract_organic_id, axis=1)
     df = df.drop_duplicates(subset="Permalink (EXTERNAL_VALUE)")
     df = df[df["Organic_ID"].notna()].copy()
-    df["Engagement Rate"] = df.apply(
-        lambda row: row["Post Likes And Reactions (SUM)"] / row["Video Views (SUM)"]
-        if row["Video Views (SUM)"] != 0 else 0,
-        axis=1,
-    )
 
+    interaction_cols = [
+        "Post Comments (SUM)",
+        "Post Shares (SUM)",
+        "Post Likes And Reactions (SUM)",
+        "TikTok Video Saves (SUM)",
+        "Instagram Business Post Saved (SUM)"
+    ]
+    # .fillna(0) ensures that missing values don't break the addition
+    df["Total Interactions"] = df[interaction_cols].fillna(0).sum(axis=1)
+
+
+    def calculate_custom_engagement(row):
+        total_int = row["Total Interactions"]
+        video_views = row["Video Views (SUM)"]
+        tiktok_views = row["TikTok Video Views (SUM)"]
+        post_reach = row["Post Reach (SUM)"]
+        
+        # 1) If Video Views (SUM) > 0
+        if video_views > 0:
+            return total_int / video_views
+        
+        # 2) If Video Views (SUM) == 0 AND TikTok Video Views > 0 
+        # (Placed first to handle specific TikTok logic before general fallback)
+        elif tiktok_views > 0:
+            return total_int / tiktok_views
+            
+        # 3) If Video Views (SUM) == 0 fallback to Post Reach
+        elif post_reach > 0:
+            return total_int / post_reach
+            
+        # 4) Alternate fallback if all denominators are 0
+        else:
+            return 0
+
+    df["Engagement Rate"] = df.apply(calculate_custom_engagement, axis=1)
+    
+    
     df["Engagement Rate"] = df["Engagement Rate"]
 
     def safe_pct(row, numerator_col):
