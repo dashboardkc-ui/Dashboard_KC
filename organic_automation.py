@@ -11,15 +11,12 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import pytz
-
 # Força flush imediato em todos os prints
 _original_print = builtins.print
 def print(*args, **kwargs):
     kwargs["flush"] = True
     _original_print(*args, **kwargs)
-
 tz_br = pytz.timezone("America/Sao_Paulo")
-
 # ==============================
 # CONFIGURAÇÕES
 # ==============================
@@ -52,7 +49,7 @@ RAW_COLUMNS_NEEDED = [
     "Count of Negative Comments (SUM)",
     "Post Shares (SUM)",
     "Post Likes And Reactions (SUM)",
-    "Is Sponsored", 
+    "Is Sponsored",
     "TikTok Video Views (SUM)",
     "Post Reach (SUM)"
 ]
@@ -73,7 +70,9 @@ SUFILE_WORKSHEET_INDEX = 2  # terceira aba (índice 0-based)
 # --- Consolidado final (SAÍDA etapa 2) ---
 CONSOLIDATED_SPREADSHEET_ID = "1sve3WtPrY89j2SPg-WHYK_gbWoseanXTNx-PXhHeVqk"
 CONSOLIDATED_SHEET_NAME = "Hoja 1"
-
+# --- Log de execução (data de início da automação) ---
+RUN_LOG_SPREADSHEET_ID = "17_D9mcA3ZvwrHZevC-eCCBJjg47q2kIKi3trLeD6ZiA"
+RUN_LOG_SHEET_NAME = "Run_Datetime"
 # ==============================
 # HELPER — CONVERSÃO SEGURA DE VALORES PARA O SHEETS
 # ==============================
@@ -103,12 +102,8 @@ def _to_sheet_value(v):
     if isinstance(v, str) and v.strip() == "":
         return ""
     return str(v)
-
-
 def _row_to_sheet_values(values):
     return [_to_sheet_value(v) for v in values]
-
-
 # ==============================
 # GOOGLE SERVICES
 # ==============================
@@ -124,8 +119,6 @@ def get_google_services():
     drive_service = build("drive", "v3", credentials=creds)
     sheets_service = build("sheets", "v4", credentials=creds)
     return drive_service, sheets_service
-
-
 # ==============================
 # ETAPA 1 — ACHAR O ARQUIVO MAIS RECENTE NO DRIVE
 # ==============================
@@ -168,8 +161,6 @@ def find_latest_file(drive_service):
     latest_date, latest_file = candidates[-1]
     print(f"Arquivo mais recente encontrado: {latest_file['name']} (data {latest_date.date()})")
     return latest_file["id"], latest_file["name"]
-
-
 def download_file(drive_service, file_id, local_path):
     request = drive_service.files().get_media(fileId=file_id, supportsAllDrives=True)
     fh = io.BytesIO()
@@ -180,8 +171,6 @@ def download_file(drive_service, file_id, local_path):
     with open(local_path, "wb") as f:
         f.write(fh.getvalue())
     print(f"Arquivo baixado em: {local_path}")
-
-
 # ==============================
 # ETAPA 2 — LER E TRATAR A ABA ORGANIC
 # ==============================
@@ -202,8 +191,6 @@ def extract_organic_id(row):
     else:
         return None
     return match.group(1) if match else None
-
-
 def read_baseline(sheets_service):
     result = sheets_service.spreadsheets().values().get(
         spreadsheetId=BASELINE_SPREADSHEET_ID,
@@ -229,8 +216,6 @@ def read_baseline(sheets_service):
         )/100
     print(f"Baseline lido: {len(baseline)} linhas.")
     return baseline
-
-
 def classify_boost(row):
     if row["Delta Eng. Rate (p.p.)"] > 0 and row["Delta Neg. Sent. (p.p.)"] <= 0:
         return "Boost"
@@ -238,8 +223,6 @@ def classify_boost(row):
         return "Review"
     else:
         return "No Boost"
-
-
 def read_organic_sheet(local_path, baseline_df):
     df = pd.read_excel(local_path, sheet_name=SOURCE_TAB, header=HEADER_SKIPROWS)
     missing_needed = [c for c in RAW_COLUMNS_NEEDED if c not in df.columns]
@@ -256,7 +239,6 @@ def read_organic_sheet(local_path, baseline_df):
     df["Organic_ID"] = df.apply(extract_organic_id, axis=1)
     df = df.drop_duplicates(subset="Permalink (EXTERNAL_VALUE)")
     df = df[df["Organic_ID"].notna()].copy()
-
     interaction_cols = [
         "Post Comments (SUM)",
         "Post Shares (SUM)",
@@ -266,36 +248,32 @@ def read_organic_sheet(local_path, baseline_df):
     ]
     # .fillna(0) ensures that missing values don't break the addition
     df["Total Interactions"] = df[interaction_cols].fillna(0).sum(axis=1)
-
-
     def calculate_custom_engagement(row):
         total_int = row["Total Interactions"]
         video_views = row["Video Views (SUM)"]
         tiktok_views = row["TikTok Video Views (SUM)"]
         post_reach = row["Post Reach (SUM)"]
-        
+
         # 1) If Video Views (SUM) > 0
         if video_views > 0:
             return total_int / video_views
-        
-        # 2) If Video Views (SUM) == 0 AND TikTok Video Views > 0 
+
+        # 2) If Video Views (SUM) == 0 AND TikTok Video Views > 0
         # (Placed first to handle specific TikTok logic before general fallback)
         elif tiktok_views > 0:
             return total_int / tiktok_views
-            
+
         # 3) If Video Views (SUM) == 0 fallback to Post Reach
         elif post_reach > 0:
             return total_int / post_reach
-            
+
         # 4) Alternate fallback if all denominators are 0
         else:
             return 0
-
     df["Engagement Rate"] = df.apply(calculate_custom_engagement, axis=1)
-    
-    
-    df["Engagement Rate"] = df["Engagement Rate"]
 
+
+    df["Engagement Rate"] = df["Engagement Rate"]
     def safe_pct(row, numerator_col):
         total = (
             row["Count of Negative Comments (SUM)"]
@@ -305,11 +283,9 @@ def read_organic_sheet(local_path, baseline_df):
         if row["Post Comments (SUM)"] == 0 or total == 0:
             return 0
         return row[numerator_col] / total
-
     df["Sent. Negativo (%)"] = df.apply(lambda r: safe_pct(r, "Count of Negative Comments (SUM)"), axis=1)
     df["Sent. Positivo (%)"] = df.apply(lambda r: safe_pct(r, "Count of Positive Comments (SUM)"), axis=1)
     df["Sent. Neutro (%)"] = df.apply(lambda r: safe_pct(r, "Count of Neutral Comments (SUM)"), axis=1)
-
     df["Sent. Negativo (%)"] = df["Sent. Negativo (%)"]
     df["Sent. Positivo (%)"] = df["Sent. Positivo (%)"]
     df["Sent. Neutro (%)"] = df["Sent. Neutro (%)"]
@@ -319,9 +295,7 @@ def read_organic_sheet(local_path, baseline_df):
         .agg("".join, axis=1)
     )
     df = df.merge(baseline_df, on="Concatenate", how="left")
-
     df["Delta Eng. Rate (p.p.)"] = df["Engagement Rate"] - df["Baseline Engagement Rate"]
-
     df["Delta Neg. Sent. (p.p.)"] = df["Sent. Negativo (%)"] - df["Baseline Neg. Com."]
     df["Accionable"] = df.apply(classify_boost, axis=1)
     if "Published Date" in df.columns:
@@ -329,8 +303,6 @@ def read_organic_sheet(local_path, baseline_df):
     df = df.fillna("")
     print(f"Linhas tratadas da aba {SOURCE_TAB} (sem Reply, deduplicadas por Permalink): {len(df)}")
     return df
-
-
 # ==============================
 # ETAPA 3 — UPSERT NO GOOGLE SHEETS (ORGANIC)
 # ==============================
@@ -349,8 +321,6 @@ def read_existing_sheet(sheets_service):
         if len(row) > key_col and row[key_col]:
             key_to_row_idx[row[key_col]] = i
     return headers, key_to_row_idx
-
-
 def ensure_header(sheets_service, existing_headers, sheet_columns):
     if existing_headers:
         return existing_headers
@@ -362,8 +332,6 @@ def ensure_header(sheets_service, existing_headers, sheet_columns):
     ).execute()
     print("Cabeçalho criado na planilha.")
     return sheet_columns
-
-
 def upsert_rows(sheets_service, df):
     other_cols = [c for c in df.columns if c != KEY_COLUMN]
     sheet_columns = [KEY_COLUMN] + other_cols + ["Last Updated At"]
@@ -414,16 +382,12 @@ def upsert_rows(sheets_service, df):
         print(f"Linhas novas inseridas: {len(append_rows)}")
     if not update_data and not append_rows:
         print("Nenhuma linha para atualizar ou inserir.")
-
-
 def _col_letter(n):
     letters = ""
     while n > 0:
         n, remainder = divmod(n - 1, 26)
         letters = chr(65 + remainder) + letters
     return letters
-
-
 # ==============================
 # ETAPA 4 — LER PAID E SUFILE, CONSOLIDAR E SALVAR
 # ==============================
@@ -436,8 +400,6 @@ def _sheet_values_to_df(rows):
     # Normaliza linhas com menos colunas que o cabeçalho
     data_rows = [r + [""] * (len(headers) - len(r)) for r in data_rows]
     return pd.DataFrame(data_rows, columns=headers)
-
-
 def read_paid_data(sheets_service):
     """Lê a primeira aba da planilha de paid data."""
     result = sheets_service.spreadsheets().values().get(
@@ -448,8 +410,6 @@ def read_paid_data(sheets_service):
     df = _sheet_values_to_df(rows)
     print(f"Paid data lido: {len(df)} linhas, {len(df.columns)} colunas.")
     return df
-
-
 def _get_sheet_name_by_index(sheets_service, spreadsheet_id, index):
     """Retorna o nome da aba pelo índice (0-based)."""
     meta = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
@@ -460,8 +420,6 @@ def _get_sheet_name_by_index(sheets_service, spreadsheet_id, index):
             f"índice {index} está fora do intervalo."
         )
     return sheets[index]["properties"]["title"]
-
-
 def read_sufile_data(sheets_service):
     """Lê a terceira aba (índice 2) da planilha Su's file."""
     tab_name = _get_sheet_name_by_index(sheets_service, SUFILE_SPREADSHEET_ID, SUFILE_WORKSHEET_INDEX)
@@ -474,8 +432,6 @@ def read_sufile_data(sheets_service):
     df = _sheet_values_to_df(rows)
     print(f"Su's file lido: {len(df)} linhas, {len(df.columns)} colunas.")
     return df
-
-
 def consolidate_data(organic_df, paid_df, sufile_df):
     """
     Faz LEFT JOIN de paid e sufile no organic via Organic_ID,
@@ -508,8 +464,6 @@ def consolidate_data(organic_df, paid_df, sufile_df):
     consolidated["Week"] = consolidated["Week"].astype(str)
     print(f"Consolidado final: {len(consolidated)} linhas, {len(consolidated.columns)} colunas.")
     return consolidated
-
-
 def save_consolidated(sheets_service, df):
     """
     Substitui todos os dados da planilha consolidada final.
@@ -536,12 +490,28 @@ def save_consolidated(sheets_service, df):
         body={"values": all_values},
     ).execute()
     print(f"Planilha consolidada atualizada com {len(data_rows)} linhas.")
-
-
+# ==============================
+# ETAPA 5 — REGISTRAR DATA DE INÍCIO DA AUTOMAÇÃO (após sucesso total)
+# ==============================
+def log_run_start(sheets_service, start_time_str):
+    """
+    Adiciona uma linha na aba Run_Datetime com a data/hora de início da
+    automação. É chamada só depois que todo o pipeline rodou com sucesso.
+    """
+    sheets_service.spreadsheets().values().append(
+        spreadsheetId=RUN_LOG_SPREADSHEET_ID,
+        range=f"{RUN_LOG_SHEET_NAME}!A:A",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": [[start_time_str]]},
+    ).execute()
+    print(f"Data de início da automação registrada em '{RUN_LOG_SHEET_NAME}': {start_time_str}")
 # ==============================
 # EXECUÇÃO PRINCIPAL
 # ==============================
 def main():
+    # Marca o horário de início da automação (será registrado só no final, se tudo der certo)
+    run_start_str = datetime.now(tz_br).strftime("%Y-%m-%d %H:%M:%S")
     print("=" * 60)
     print("INICIANDO PIPELINE COMPLETO")
     print("=" * 60)
@@ -565,10 +535,10 @@ def main():
     print("\n[ETAPA 3/3] Consolidando e salvando planilha final...")
     consolidated_df = consolidate_data(organic_df, paid_df, sufile_df)
     save_consolidated(sheets_service, consolidated_df)
+    # --- Etapa 5: registra a data de início da automação, só após sucesso total ---
+    log_run_start(sheets_service, run_start_str)
     print("\n" + "=" * 60)
     print("PIPELINE FINALIZADO COM SUCESSO")
     print("=" * 60)
-
-
 if __name__ == "__main__":
     main()
