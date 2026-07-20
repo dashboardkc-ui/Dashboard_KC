@@ -510,8 +510,6 @@ def log_run_start(sheets_service, start_time_str):
 # EXECUÇÃO PRINCIPAL
 # ==============================
 def main():
-    # Marca o horário de início da automação (será registrado só no final, se tudo der certo)
-    run_start_str = datetime.now(tz_br).strftime("%Y-%m-%d %H:%M:%S")
     print("=" * 60)
     print("INICIANDO PIPELINE COMPLETO")
     print("=" * 60)
@@ -535,8 +533,9 @@ def main():
     print("\n[ETAPA 3/3] Consolidando e salvando planilha final...")
     consolidated_df = consolidate_data(organic_df, paid_df, sufile_df)
     save_consolidated(sheets_service, consolidated_df)
-    # --- Etapa 5: registra a data de início da automação, só após sucesso total ---
-    log_run_start(sheets_service, run_start_str)
+    # --- Etapa 5: registra a data/hora de conclusão da automação, só após sucesso total ---
+    run_end_str = datetime.now(tz_br).strftime("%Y-%m-%d %H:%M:%S")
+    log_run_start(sheets_service, run_end_str)
     print("\n" + "=" * 60)
     print("PIPELINE FINALIZADO COM SUCESSO")
     print("=" * 60)
