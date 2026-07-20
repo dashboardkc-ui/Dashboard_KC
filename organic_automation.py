@@ -495,15 +495,16 @@ def save_consolidated(sheets_service, df):
 # ==============================
 def log_run_start(sheets_service, start_time_str):
     """
-    Adiciona uma linha na aba Run_Datetime com a data/hora de início da
-    automação. É chamada só depois que todo o pipeline rodou com sucesso.
+    Adiciona uma linha na aba Run_Datetime com a data/hora de conclusão da
+    automação (coluna A) e o nome do script (coluna B). É chamada só depois
+    que todo o pipeline rodou com sucesso.
     """
     sheets_service.spreadsheets().values().append(
         spreadsheetId=RUN_LOG_SPREADSHEET_ID,
-        range=f"{RUN_LOG_SHEET_NAME}!A:A",
+        range=f"{RUN_LOG_SHEET_NAME}!A:B",
         valueInputOption="USER_ENTERED",
         insertDataOption="INSERT_ROWS",
-        body={"values": [[start_time_str]]},
+        body={"values": [[start_time_str, "Sprinklr_Organic_Script"]]},
     ).execute()
     print(f"Data de início da automação registrada em '{RUN_LOG_SHEET_NAME}': {start_time_str}")
 # ==============================
