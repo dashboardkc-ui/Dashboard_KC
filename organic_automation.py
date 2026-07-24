@@ -237,7 +237,6 @@ def read_organic_sheet(local_path, baseline_df):
     df = df[RAW_COLUMNS_NEEDED].copy()
     df = df[df["Outbound Message Category"] != "Reply"].copy()
     df["Organic_ID"] = df.apply(extract_organic_id, axis=1)
-    df = df.drop_duplicates(subset="Permalink (EXTERNAL_VALUE)")
     df = df[df["Organic_ID"].notna()].copy()
     interaction_cols = [
         "Post Comments (SUM)",
