@@ -11,7 +11,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import pytz
-# Força flush imediato em todos os prints
+# Força flush imediato em todos os printshttps://github.com/dashboardkc-ui/Dashboard_KC/blob/main/organic_automation.py
 _original_print = builtins.print
 def print(*args, **kwargs):
     kwargs["flush"] = True
@@ -29,7 +29,20 @@ BASELINE_SHEET_RANGE = "A:Z"
 SOURCE_TAB = "Winclap_Organic"
 HEADER_SKIPROWS = 2
 FILENAME_PATTERN = re.compile(r"^(\d{2})(\d{2})(\d{4})\.xlsx$")  # DDMMAAAA.xlsx
+ 
+# Chave usada para JUNTAR os dados de paid e Su's file (não muda).
 KEY_COLUMN = "Organic_ID"
+ 
+# Nome da coluna de permalink no relatório (mantido exatamente como vem no
+# arquivo; repare que há um espaço inicial em " (EXTERNAL_VALUE)"). Se o
+# cabeçalho real for "Permalink (EXTERNAL_VALUE)", basta trocar aqui.
+PERMALINK_COLUMN = " (EXTERNAL_VALUE)"
+ 
+# Chave COMPOSTA para identificar linhas únicas (deduplicação + upsert/update):
+# Permalink + Country of Origin. É criada em read_organic_sheet e gravada na
+# planilha como a coluna abaixo, para permitir o match nas próximas execuções.
+UPSERT_KEY_COLUMN = "Unique_Key"
+ 
 RAW_COLUMNS_NEEDED = [
     "Published Date",
     "Social Network",
@@ -39,7 +52,7 @@ RAW_COLUMNS_NEEDED = [
     "Outbound Post",
     "Outbound Post Id",
     "Outbound Message Category",
-    " (EXTERNAL_VALUE)",
+    PERMALINK_COLUMN,
     "Video Views (SUM)",
     "TikTok Video Saves (SUM)",
     "Instagram Business Post Saved (SUM)",
@@ -175,7 +188,7 @@ def download_file(drive_service, file_id, local_path):
 # ETAPA 2 — LER E TRATAR A ABA ORGANIC
 # ==============================
 def extract_organic_id(row):
-    url = row[" (EXTERNAL_VALUE)"]
+    url = row[PERMALINK_COLUMN]
     network = row["Social Network"]
     category = row["Outbound Message Category"]
     if not isinstance(url, str):
@@ -238,6 +251,19 @@ def read_organic_sheet(local_path, baseline_df):
     df = df[df["Outbound Message Category"] != "Reply"].copy()
     df["Organic_ID"] = df.apply(extract_organic_id, axis=1)
     df = df[df["Organic_ID"].notna()].copy()
+ 
+    # ------------------------------------------------------------------
+    # CHAVE COMPOSTA + DEDUPLICAÇÃO
+    # Identidade única da linha = Permalink + Country of Origin.
+    # ------------------------------------------------------------------
+    df[UPSERT_KEY_COLUMN] = (
+        df[PERMALINK_COLUMN].fillna("").astype(str).str.strip()
+        + "||"
+        + df["Country of Origin (Account)"].fillna("").astype(str).str.strip()
+    )
+    # Remove duplicatas com base na chave composta (mantém a 1ª ocorrência).
+    df = df.drop_duplicates(subset=UPSERT_KEY_COLUMN).copy()
+ 
     interaction_cols = [
         "Post Comments (SUM)",
         "Post Shares (SUM)",
@@ -252,26 +278,20 @@ def read_organic_sheet(local_path, baseline_df):
         video_views = row["Video Views (SUM)"]
         tiktok_views = row["TikTok Video Views (SUM)"]
         post_reach = row["Post Reach (SUM)"]
-
         # 1) If Video Views (SUM) > 0
         if video_views > 0:
             return total_int / video_views
-
         # 2) If Video Views (SUM) == 0 AND TikTok Video Views > 0
         # (Placed first to handle specific TikTok logic before general fallback)
         elif tiktok_views > 0:
             return total_int / tiktok_views
-
         # 3) If Video Views (SUM) == 0 fallback to Post Reach
         elif post_reach > 0:
             return total_int / post_reach
-
         # 4) Alternate fallback if all denominators are 0
         else:
             return 0
     df["Engagement Rate"] = df.apply(calculate_custom_engagement, axis=1)
-
-
     df["Engagement Rate"] = df["Engagement Rate"]
     def safe_pct(row, numerator_col):
         total = (
@@ -300,7 +320,10 @@ def read_organic_sheet(local_path, baseline_df):
     if "Published Date" in df.columns:
         df["Published Date"] = pd.to_datetime(df["Published Date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
     df = df.fillna("")
-    print(f"Linhas tratadas da aba {SOURCE_TAB} (sem Reply, NAO deduplicadas por Permalink): {len(df)}")
+    print(
+        f"Linhas tratadas da aba {SOURCE_TAB} "
+        f"(sem Reply, deduplicadas por {UPSERT_KEY_COLUMN} = Permalink + Country): {len(df)}"
+    )
     return df
 # ==============================
 # ETAPA 3 — UPSERT NO GOOGLE SHEETS (ORGANIC)
@@ -314,7 +337,7 @@ def read_existing_sheet(sheets_service):
     if not rows:
         return [], {}
     headers = rows[0]
-    key_col = headers.index(KEY_COLUMN) if KEY_COLUMN in headers else 0
+    key_col = headers.index(UPSERT_KEY_COLUMN) if UPSERT_KEY_COLUMN in headers else 0
     key_to_row_idx = {}
     for i, row in enumerate(rows[1:], start=2):
         if len(row) > key_col and row[key_col]:
@@ -332,8 +355,8 @@ def ensure_header(sheets_service, existing_headers, sheet_columns):
     print("Cabeçalho criado na planilha.")
     return sheet_columns
 def upsert_rows(sheets_service, df):
-    other_cols = [c for c in df.columns if c != KEY_COLUMN]
-    sheet_columns = [KEY_COLUMN] + other_cols + ["Last Updated At"]
+    other_cols = [c for c in df.columns if c != UPSERT_KEY_COLUMN]
+    sheet_columns = [UPSERT_KEY_COLUMN] + other_cols + ["Last Updated At"]
     existing_headers, key_to_row_idx = read_existing_sheet(sheets_service)
     headers = ensure_header(sheets_service, existing_headers, sheet_columns)
     if set(sheet_columns) != set(headers):
@@ -351,7 +374,7 @@ def upsert_rows(sheets_service, df):
     data_headers = [h for h in headers if h != "Last Updated At"]
     end_col_letter = _col_letter(len(headers))
     for _, row in df.iterrows():
-        key = str(row[KEY_COLUMN]).strip()
+        key = str(row[UPSERT_KEY_COLUMN]).strip()
         raw_values = [row.get(col, "") for col in data_headers] + [now_str]
         # Mantém números como int/float nativos (em vez de forçar str),
         # para o Sheets gravar como número de verdade e não como texto.
