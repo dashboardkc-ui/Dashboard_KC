@@ -11,7 +11,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 import pytz
-# Força flush imediato em todos os printshttps://github.com/dashboardkc-ui/Dashboard_KC/blob/main/organic_automation.py
+# Força flush imediato em todos os prints
 _original_print = builtins.print
 def print(*args, **kwargs):
     kwargs["flush"] = True
@@ -30,13 +30,13 @@ SOURCE_TAB = "Winclap_Organic"
 HEADER_SKIPROWS = 2
 FILENAME_PATTERN = re.compile(r"^(\d{2})(\d{2})(\d{4})\.xlsx$")  # DDMMAAAA.xlsx
  
-# Chave usada para JUNTAR os dados de paid e Su's file (não muda).
+# ID orgânico extraído do permalink (mantido como coluna de dados).
 KEY_COLUMN = "Organic_ID"
  
 # Nome da coluna de permalink no relatório (mantido exatamente como vem no
 # arquivo; repare que há um espaço inicial em " (EXTERNAL_VALUE)"). Se o
 # cabeçalho real for "Permalink (EXTERNAL_VALUE)", basta trocar aqui.
-PERMALINK_COLUMN = "Permalink (EXTERNAL_VALUE)"
+PERMALINK_COLUMN = " (EXTERNAL_VALUE)"
  
 # Chave COMPOSTA para identificar linhas únicas (deduplicação + upsert/update):
 # Permalink + Country of Origin. É criada em read_organic_sheet e gravada na
@@ -74,15 +74,6 @@ BASELINE_COLUMNS_MAP = {
     "Post Likes And Reactions": "Baseline Post Likes And Reactions",
     "Post Comments / X Replies (SUM)": "Baseline Post Comments",
 }
-# --- Paid ---
-PAID_SPREADSHEET_ID = "1W73RHKRuKfp-AAVQDgrMSwP3huq0r8-bDeRMLjbPxZA"
-PAID_SHEET_RANGE = "A:ZZ"  # primeira aba
-# --- Su's file ---
-SUFILE_SPREADSHEET_ID = "1ZPVLBEfQWpVKO-DLxHYUu2xFW1URgpSBwQgHwf6ZcCM"
-SUFILE_WORKSHEET_INDEX = 2  # terceira aba (índice 0-based)
-# --- Consolidado final (SAÍDA etapa 2) ---
-CONSOLIDATED_SPREADSHEET_ID = "1sve3WtPrY89j2SPg-WHYK_gbWoseanXTNx-PXhHeVqk"
-CONSOLIDATED_SHEET_NAME = "Hoja 1"
 # --- Log de execução (data de início da automação) ---
 RUN_LOG_SPREADSHEET_ID = "17_D9mcA3ZvwrHZevC-eCCBJjg47q2kIKi3trLeD6ZiA"
 RUN_LOG_SHEET_NAME = "Run_Datetime"
@@ -411,108 +402,6 @@ def _col_letter(n):
         letters = chr(65 + remainder) + letters
     return letters
 # ==============================
-# ETAPA 4 — LER PAID E SUFILE, CONSOLIDAR E SALVAR
-# ==============================
-def _sheet_values_to_df(rows):
-    """Converte o retorno bruto da Sheets API em DataFrame."""
-    if not rows:
-        return pd.DataFrame()
-    headers = rows[0]
-    data_rows = rows[1:]
-    # Normaliza linhas com menos colunas que o cabeçalho
-    data_rows = [r + [""] * (len(headers) - len(r)) for r in data_rows]
-    return pd.DataFrame(data_rows, columns=headers)
-def read_paid_data(sheets_service):
-    """Lê a primeira aba da planilha de paid data."""
-    result = sheets_service.spreadsheets().values().get(
-        spreadsheetId=PAID_SPREADSHEET_ID,
-        range=PAID_SHEET_RANGE,
-    ).execute()
-    rows = result.get("values", [])
-    df = _sheet_values_to_df(rows)
-    print(f"Paid data lido: {len(df)} linhas, {len(df.columns)} colunas.")
-    return df
-def _get_sheet_name_by_index(sheets_service, spreadsheet_id, index):
-    """Retorna o nome da aba pelo índice (0-based)."""
-    meta = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
-    sheets = meta.get("sheets", [])
-    if index >= len(sheets):
-        raise RuntimeError(
-            f"A planilha {spreadsheet_id} tem apenas {len(sheets)} aba(s); "
-            f"índice {index} está fora do intervalo."
-        )
-    return sheets[index]["properties"]["title"]
-def read_sufile_data(sheets_service):
-    """Lê a terceira aba (índice 2) da planilha Su's file."""
-    tab_name = _get_sheet_name_by_index(sheets_service, SUFILE_SPREADSHEET_ID, SUFILE_WORKSHEET_INDEX)
-    print(f"Su's file: lendo aba '{tab_name}' (índice {SUFILE_WORKSHEET_INDEX}).")
-    result = sheets_service.spreadsheets().values().get(
-        spreadsheetId=SUFILE_SPREADSHEET_ID,
-        range=f"'{tab_name}'!A:ZZ",
-    ).execute()
-    rows = result.get("values", [])
-    df = _sheet_values_to_df(rows)
-    print(f"Su's file lido: {len(df)} linhas, {len(df.columns)} colunas.")
-    return df
-def consolidate_data(organic_df, paid_df, sufile_df):
-    """
-    Faz LEFT JOIN de paid e sufile no organic via Organic_ID,
-    preenche NaN com 0 e adiciona coluna de semana (segunda-feira).
-    """
-    # Adiciona prefixo 'paid_' em todas as colunas do paid, exceto a chave
-    paid_df = paid_df.copy()
-    paid_df.columns = [
-        col if col == KEY_COLUMN else f"paid_{col}"
-        for col in paid_df.columns
-    ]
-    consolidated = (
-        organic_df
-        .merge(paid_df, on=KEY_COLUMN, how="left")
-        .merge(sufile_df, on=KEY_COLUMN, how="left")
-    )
-    consolidated = consolidated.fillna(0)
-    # Coluna Week (segunda-feira da semana de publicação)
-    consolidated["Published Date"] = pd.to_datetime(
-        consolidated["Published Date"], errors="coerce"
-    )
-    consolidated["Week"] = (
-        consolidated["Published Date"]
-        - pd.to_timedelta(consolidated["Published Date"].dt.dayofweek, unit="D")
-    ).dt.date
-    # Volta Published Date para string para salvar no Sheets
-    consolidated["Published Date"] = consolidated["Published Date"].dt.strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
-    consolidated["Week"] = consolidated["Week"].astype(str)
-    print(f"Consolidado final: {len(consolidated)} linhas, {len(consolidated.columns)} colunas.")
-    return consolidated
-def save_consolidated(sheets_service, df):
-    """
-    Substitui todos os dados da planilha consolidada final.
-    Limpa a aba e reescreve cabeçalho + dados.
-    """
-    tab_name = CONSOLIDATED_SHEET_NAME
-    print(f"Planilha consolidada: usando aba '{tab_name}'.")
-    # 1. Limpa a aba
-    sheets_service.spreadsheets().values().clear(
-        spreadsheetId=CONSOLIDATED_SPREADSHEET_ID,
-        range=f"'{tab_name}'!A:ZZ",
-    ).execute()
-    # 2. Monta os valores (cabeçalho + dados), preservando números como
-    #    int/float nativos em vez de converter tudo para string.
-    headers = list(df.columns)
-    data_rows = [_row_to_sheet_values(row) for row in df.values.tolist()]
-    all_values = [headers] + data_rows
-    # 3. Escreve tudo de uma vez, com USER_ENTERED para o Sheets interpretar
-    #    números/datas corretamente (evita entrarem como texto).
-    sheets_service.spreadsheets().values().update(
-        spreadsheetId=CONSOLIDATED_SPREADSHEET_ID,
-        range=f"{CONSOLIDATED_SHEET_NAME}!A1",
-        valueInputOption="USER_ENTERED",
-        body={"values": all_values},
-    ).execute()
-    print(f"Planilha consolidada atualizada com {len(data_rows)} linhas.")
-# ==============================
 # ETAPA 5 — REGISTRAR DATA DE INÍCIO DA AUTOMAÇÃO (após sucesso total)
 # ==============================
 def log_run_start(sheets_service, start_time_str):
@@ -542,20 +431,13 @@ def main():
         sys.exit(1)
     drive_service, sheets_service = get_google_services()
     # --- Etapa 1 & 2: Organic (Winclap) ---
-    print("\n[ETAPA 1/3] Processando dados orgânicos (Winclap)...")
+    print("\n[ETAPA 1/1] Processando dados orgânicos (Winclap)...")
     file_id, file_name = find_latest_file(drive_service)
     local_path = f"/tmp/{file_name}"
     download_file(drive_service, file_id, local_path)
     baseline_df = read_baseline(sheets_service)
     organic_df = read_organic_sheet(local_path, baseline_df)
     upsert_rows(sheets_service, organic_df)
-    # --- Etapa 3: Paid + Su's file → Consolidado ---
-    print("\n[ETAPA 2/3] Lendo dados de paid e Su's file...")
-    paid_df = read_paid_data(sheets_service)
-    sufile_df = read_sufile_data(sheets_service)
-    print("\n[ETAPA 3/3] Consolidando e salvando planilha final...")
-    consolidated_df = consolidate_data(organic_df, paid_df, sufile_df)
-    save_consolidated(sheets_service, consolidated_df)
     # --- Etapa 5: registra a data/hora de conclusão da automação, só após sucesso total ---
     run_end_str = datetime.now(tz_br).strftime("%Y-%m-%d %H:%M:%S")
     log_run_start(sheets_service, run_end_str)
@@ -564,3 +446,4 @@ def main():
     print("=" * 60)
 if __name__ == "__main__":
     main()
+ 
