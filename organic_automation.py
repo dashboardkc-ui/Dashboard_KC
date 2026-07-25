@@ -39,7 +39,7 @@ RAW_COLUMNS_NEEDED = [
     "Outbound Post",
     "Outbound Post Id",
     "Outbound Message Category",
-    "Permalink (EXTERNAL_VALUE)",
+    " (EXTERNAL_VALUE)",
     "Video Views (SUM)",
     "TikTok Video Saves (SUM)",
     "Instagram Business Post Saved (SUM)",
@@ -175,7 +175,7 @@ def download_file(drive_service, file_id, local_path):
 # ETAPA 2 — LER E TRATAR A ABA ORGANIC
 # ==============================
 def extract_organic_id(row):
-    url = row["Permalink (EXTERNAL_VALUE)"]
+    url = row[" (EXTERNAL_VALUE)"]
     network = row["Social Network"]
     category = row["Outbound Message Category"]
     if not isinstance(url, str):
@@ -300,7 +300,7 @@ def read_organic_sheet(local_path, baseline_df):
     if "Published Date" in df.columns:
         df["Published Date"] = pd.to_datetime(df["Published Date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
     df = df.fillna("")
-    print(f"Linhas tratadas da aba {SOURCE_TAB} (sem Reply, deduplicadas por Permalink): {len(df)}")
+    print(f"Linhas tratadas da aba {SOURCE_TAB} (sem Reply, NAO deduplicadas por Permalink): {len(df)}")
     return df
 # ==============================
 # ETAPA 3 — UPSERT NO GOOGLE SHEETS (ORGANIC)
