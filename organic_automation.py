@@ -36,7 +36,7 @@ KEY_COLUMN = "Organic_ID"
 # Nome da coluna de permalink no relatório (mantido exatamente como vem no
 # arquivo; repare que há um espaço inicial em " (EXTERNAL_VALUE)"). Se o
 # cabeçalho real for "Permalink (EXTERNAL_VALUE)", basta trocar aqui.
-PERMALINK_COLUMN = " (EXTERNAL_VALUE)"
+PERMALINK_COLUMN = "Permalink (EXTERNAL_VALUE)"
  
 # Chave COMPOSTA para identificar linhas únicas (deduplicação + upsert/update):
 # Permalink + Country of Origin. É criada em read_organic_sheet e gravada na
