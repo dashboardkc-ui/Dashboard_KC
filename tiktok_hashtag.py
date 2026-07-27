@@ -26,7 +26,7 @@ SHEET_DETAIL   = "Hashtag_posts_detail"  # aba de saída final
 tz_br = pytz.timezone("America/Sao_Paulo")
 # Janela mínima (em dias) entre execuções da mesma hashtag
 # Ajustado para 14 dias para permitir cadência de execução a cada 15 dias.
-MIN_DAYS_BETWEEN_RUNS = 14
+MIN_DAYS_BETWEEN_RUNS = 60
 # Países da América Central e do Sul (ISO 2) — apenas posts dessas regiões são salvos
 ALLOWED_COUNTRIES = {
     "BZ", "CR", "SV", "GT", "HN", "NI", "PA",
