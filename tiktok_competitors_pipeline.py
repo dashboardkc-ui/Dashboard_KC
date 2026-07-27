@@ -17,8 +17,8 @@ TAB_TIKTOK_PROFILE   = "tt_competitors_data"
 TAB_TT_DATA_POST     = "Hashtag_posts_detail"
 API_BASE         = "https://api.sociavault.com/v1/scrape/tiktok"
 MAX_POSTS        = 10
-POST_MAX_DAYS    = 14   # só processa vídeos publicados nos últimos N dias
-PROFILE_REFRESH_DAYS = 30  # só reprocessa um perfil se já passaram esses dias desde o último run
+POST_MAX_DAYS    = 60   # só processa vídeos publicados nos últimos N dias
+PROFILE_REFRESH_DAYS = 1  # só reprocessa um perfil se já passaram esses dias desde o último run
 # ==============================
 # GOOGLE SHEETS HELPERS
 # ==============================
