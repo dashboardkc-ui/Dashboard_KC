@@ -32,6 +32,7 @@ SPREADSHEET_DATA_COMMENTS_ID = "1dD69AANExCtYQG0g3MX8q5Sv794J0ajkRJ2GLGhaqLI"
 # Sheet names
 SHEET_PROFILES = "instagram_profile"
 SHEET_DATA_PROFILE = "data_profile_post"
+SHEET_DATA_PROFILE_MAX = "data_profile_post_max"
 SHEET_DATA_COMMENTS = "data_comments_post"
 tz_br = pytz.timezone("America/Sao_Paulo")
 # ==============================
@@ -538,6 +539,108 @@ def save_post_snapshot_to_sheets(sheets_service, post_entry, caption, post_meta,
             body={"values": append_values}
         ).execute()
         print(f"  data_profile_post: snapshot salvo ({run_datetime}).")
+
+def update_data_profile_post_max(sheets_service):
+    """
+    Atualiza a aba 'data_profile_post_max', que mantém a versão mais recente
+    de cada post (indexado por 'code').
+ 
+    Lógica:
+      1. Lê 'data_profile_post' e, para cada 'code', mantém apenas a linha
+         com o maior 'run_datetime'.
+      2. Compara essas linhas com 'data_profile_post_max' usando 'code' como índice.
+      3. Se o 'code' já existe no _max: substitui a linha SOMENTE se o
+         'run_datetime' da origem for maior que o do _max.
+      4. Se o 'code' não existe no _max: adiciona como nova linha.
+    """
+    print("\n[POS-PROCESSO] Atualizando data_profile_post_max...")
+ 
+    # --- 1. Lê data_profile_post ---
+    resp = sheets_service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_DATA_PROFILE_ID,
+        range=f"{SHEET_DATA_PROFILE}!A:Z"
+    ).execute()
+    rows = resp.get("values", [])
+    if len(rows) <= 1:
+        print("  data_profile_post_max: origem vazia, nada a fazer.")
+        return
+ 
+    header = rows[0]
+    ncols = len(header)
+    data_rows = [(r + [""] * ncols)[:ncols] for r in rows[1:]]
+    df_src = pd.DataFrame(data_rows, columns=header)
+ 
+    if "code" not in df_src.columns or "run_datetime" not in df_src.columns:
+        print("  data_profile_post_max: colunas 'code'/'run_datetime' ausentes na origem.")
+        return
+ 
+    # Remove linhas sem 'code' (linhas em branco / vazias)
+    df_src = df_src[df_src["code"].astype(str).str.strip() != ""]
+    if df_src.empty:
+        print("  data_profile_post_max: nenhuma linha com 'code' válido na origem.")
+        return
+ 
+    # --- 2. Mantém, por 'code', apenas a linha com run_datetime mais recente ---
+    df_src["_dt"] = pd.to_datetime(df_src["run_datetime"], errors="coerce")
+    df_src = df_src.sort_values("_dt").drop_duplicates(subset="code", keep="last")
+ 
+    # --- 3. Lê data_profile_post_max ---
+    resp_max = sheets_service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_DATA_PROFILE_ID,
+        range=f"{SHEET_DATA_PROFILE_MAX}!A:Z"
+    ).execute()
+    rows_max = resp_max.get("values", [])
+    if rows_max:
+        header_max = rows_max[0]
+        nmax = len(header_max)
+        max_rows = [(r + [""] * nmax)[:nmax] for r in rows_max[1:]]
+        df_max = pd.DataFrame(max_rows, columns=header_max)
+    else:
+        # aba vazia: inicializa com o mesmo cabeçalho da origem
+        header_max = header
+        df_max = pd.DataFrame(columns=header)
+ 
+    df_max["_dt"] = pd.to_datetime(df_max.get("run_datetime"), errors="coerce")
+ 
+    # Índice: code -> posição da linha no df_max (última ocorrência vence)
+    max_by_code = {str(c): idx for idx, c in df_max["code"].items()}
+ 
+    # --- 4. Aplica atualizações / inserções ---
+    updated, appended = 0, 0
+    for _, srow in df_src.iterrows():
+        code = str(srow["code"])
+        src_dt = srow["_dt"]
+        if code in max_by_code:
+            idx = max_by_code[code]
+            max_dt = df_max.at[idx, "_dt"]
+            # substitui apenas se a origem for mais recente
+            if pd.notna(src_dt) and (pd.isna(max_dt) or src_dt > max_dt):
+                for col in header:
+                    if col in df_max.columns:
+                        df_max.at[idx, col] = srow[col]
+                df_max.at[idx, "_dt"] = src_dt
+                updated += 1
+        else:
+            new_row = {col: srow.get(col, "") for col in df_max.columns if col != "_dt"}
+            new_row["_dt"] = src_dt
+            df_max = pd.concat([df_max, pd.DataFrame([new_row])], ignore_index=True)
+            appended += 1
+ 
+    # --- 5. Reescreve a aba inteira (o nº de linhas nunca diminui) ---
+    out_cols = [c for c in df_max.columns if c != "_dt"]
+    df_out = df_max[out_cols].fillna("").astype(str)
+    values = [out_cols] + df_out.values.tolist()
+ 
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_DATA_PROFILE_ID,
+        range=f"{SHEET_DATA_PROFILE_MAX}!A1",
+        valueInputOption="RAW",
+        body={"values": values}
+    ).execute()
+ 
+    print(f"  data_profile_post_max: {updated} linha(s) atualizada(s), "
+          f"{appended} nova(s) adicionada(s). Total: {len(df_out)} linha(s).")
+
 def save_comments_to_sheets(sheets_service, df):
     df = df.fillna("")
     existing_data = sheets_service.spreadsheets().values().get(
@@ -646,6 +749,13 @@ def main():
         except Exception as e:
             print(f"  ERRO ao processar post {post_url}: {e}. Pulando.")
             continue
+
+    try:
+        _, sheets_service = get_google_services()  # reconecta para evitar timeout
+        update_data_profile_post_max(sheets_service)
+    except Exception as e:
+        print(f"  ERRO ao atualizar data_profile_post_max: {e}")
+
     print(f"\n{'=' * 60}")
     print("PIPELINE FINALIZADO COM SUCESSO")
     print(f"{'=' * 60}")
