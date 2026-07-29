@@ -676,10 +676,11 @@ def main():
     
             
     print(f"\n=== Pipeline finalizado. Total de comentários salvos: {total_salvos} ===", flush=True)
-        try:
-            normalizar_tipos_post_max(service)
-        except Exception as e:
-            print(f"  Erro na ETAPA 4 (normalizar tipos): {e}", flush=True)
+    # ETAPA 4 — Normalizar tipos na versão final de tt_data_post_post_max
+    try:
+        normalizar_tipos_post_max(service)
+    except Exception as e:
+        print(f"  Erro na ETAPA 4 (normalizar tipos): {e}", flush=True)
     
 if __name__ == "__main__":
     main()
