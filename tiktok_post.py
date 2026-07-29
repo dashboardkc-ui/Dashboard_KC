@@ -202,6 +202,88 @@ def atualizar_post_max(service):
  
     print(f"  {atualizados} linha(s) atualizada(s) e {len(novos)} nova(s) anexada(s) "
           f"em tt_data_post_post_max.", flush=True)
+
+# ==============================
+# ETAPA 4 — NORMALIZAR TIPOS EM tt_data_post_post_max
+# ==============================
+
+# Aceita os dois nomes possíveis (código x planilha) — só processa os que existirem.
+NUM_COLS_MAX = {
+    "likes", "digg_count", "comment_count", "share_count",
+    "views", "play_count", "saves", "collect_count",
+    "download_count", "whatsapp_share_count", "forward_count",
+    "repost_count", "create_time",
+}
+DT_COLS_MAX = {"run_datetime", "Published date"}
+
+
+def _col_letter(idx):
+    """0-based -> letra de coluna A1 (A, B, ..., Z, AA...)."""
+    letters = ""
+    idx += 1
+    while idx:
+        idx, rem = divmod(idx - 1, 26)
+        letters = chr(65 + rem) + letters
+    return letters
+
+
+def _to_number(v):
+    s = str(v).strip()
+    if s == "" or s.lower() in ("nan", "none"):
+        return ""
+    try:
+        f = float(s)
+        return int(f) if f.is_integer() else f
+    except ValueError:
+        return s  # deixa como está se não for número
+
+
+def _to_datetime_str(v):
+    s = str(v).strip()
+    if not s:
+        return ""
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%m/%d/%Y %H:%M:%S", "%d/%m/%Y %H:%M:%S",
+                "%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).strftime("%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            continue
+    return s  # deixa como está se não parsear
+
+
+def normalizar_tipos_post_max(service):
+    """ETAPA 4 — relê tt_data_post_post_max e garante:
+       - colunas numéricas gravadas como número;
+       - run_datetime / Published date gravadas como datetime.
+       Só reescreve as colunas afetadas (IDs e texto ficam intactos)."""
+    print("\n[ETAPA 4] Normalizando tipos em tt_data_post_post_max...", flush=True)
+
+    df = read_sheet(service, SHEET_TT_DATA_POST_ID, TAB_TT_DATA_POST_MAX)
+    if df.empty:
+        print("  Tab vazia. Nada a fazer.", flush=True)
+        return
+
+    n_rows = len(df)
+    for idx, col in enumerate(df.columns):
+        if col in NUM_COLS_MAX:
+            conv, opt = _to_number, "RAW"            # número nativo -> fica número
+        elif col in DT_COLS_MAX:
+            conv, opt = _to_datetime_str, "USER_ENTERED"  # string ISO -> Sheets vira data
+        else:
+            continue
+
+        col_values = [[conv(v)] for v in df[col].tolist()]
+        letter = _col_letter(idx)
+        service.spreadsheets().values().update(
+            spreadsheetId=SHEET_TT_DATA_POST_ID,
+            range=f"{TAB_TT_DATA_POST_MAX}!{letter}2:{letter}{n_rows + 1}",
+            valueInputOption=opt,
+            body={"values": col_values}
+        ).execute()
+        print(f"  Coluna '{col}' normalizada ({opt}).", flush=True)
+
+    print("  Tipos normalizados.", flush=True)
+
 # ==============================
 # SOCIAVAULT HELPERS
 # ==============================
@@ -590,7 +672,14 @@ def main():
             atualizar_post_max(service)
         except Exception as e:
             print(f"  Erro na ETAPA 3 (post_max): {e}", flush=True)
+
+    
             
     print(f"\n=== Pipeline finalizado. Total de comentários salvos: {total_salvos} ===", flush=True)
+        try:
+            normalizar_tipos_post_max(service)
+        except Exception as e:
+            print(f"  Erro na ETAPA 4 (normalizar tipos): {e}", flush=True)
+    
 if __name__ == "__main__":
     main()
