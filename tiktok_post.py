@@ -98,18 +98,58 @@ def _update_row(service, spreadsheet_id, tab, row_number, values_list):
     service.spreadsheets().values().update(
         spreadsheetId=spreadsheet_id,
         range=f"{tab}!A{row_number}",
-        valueInputOption="RAW",
+        valueInputOption="USER_ENTERED",   # <-- era "RAW"
         body={"values": [values_list]}
     ).execute()
  
  
 def _align_row(series, columns):
-    """Devolve os valores da Series na ordem exata de `columns` (como strings)."""
+NUMERIC_COLS = {"likes", "comment_count", "share_count", "views", "saves",
+                "download_count", "whatsapp_share_count", "forward_count",
+                "repost_count", "create_time"}
+TEXT_COLS = {"aweme_id"}
+
+
+def _num(v):
+    """Converte para int/float quando possível; senão devolve o valor original."""
+    s = str(v).strip()
+    if s == "" or s.lower() in ("nan", "none"):
+        return ""
+    try:
+        f = float(s)
+        return int(f) if f.is_integer() else f
+    except ValueError:
+        return s  # ex.: '#VALUE!' fica como está
+
+
+def _typed_row(series, columns):
+    """Alinha à ordem de `columns` já com o TIPO certo (número / texto / data-string)."""
     out = []
     for c in columns:
         v = series.get(c, "")
-        out.append("" if (v is None or pd.isna(v)) else str(v))
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            v = ""
+        if c in NUMERIC_COLS:
+            out.append(_num(v))
+        elif c in TEXT_COLS:
+            # apóstrofo força texto no Sheets (não aparece na célula) e preserva os 19 dígitos
+            out.append("'" + str(v) if str(v).strip() else "")
+        else:
+            out.append(str(v))   # datas ('run_datetime', 'Published date') e urls/desc
     return out
+
+
+def _append_rows(service, spreadsheet_id, tab, rows):
+    """Anexa linhas já tipadas usando USER_ENTERED (para o Sheets interpretar números/datas)."""
+    if not rows:
+        return
+    service.spreadsheets().values().append(
+        spreadsheetId=spreadsheet_id,
+        range=f"{tab}!A1",
+        valueInputOption="USER_ENTERED",
+        insertDataOption="INSERT_ROWS",
+        body={"values": rows}
+    ).execute()
  
  
 def atualizar_post_max(service):
@@ -178,7 +218,7 @@ def atualizar_post_max(service):
         aid = str(srow["aweme_id"]).strip()
         if not aid:
             continue
-        values = _align_row(srow, max_cols)
+        values = _typed_row(srow, max_cols)
  
         if aid in max_pos:
             # já existe -> só atualiza se a origem for mais recente
@@ -196,9 +236,8 @@ def atualizar_post_max(service):
             # não existe -> anexa
             novos.append(values)
  
-    if novos:
-        df_novos = pd.DataFrame(novos, columns=max_cols)
-        append_to_sheet(service, SHEET_TT_DATA_POST_ID, TAB_TT_DATA_POST_MAX, df_novos)
+        if novos:
+            _append_rows(service, SHEET_TT_DATA_POST_ID, TAB_TT_DATA_POST_MAX, novos)
  
     print(f"  {atualizados} linha(s) atualizada(s) e {len(novos)} nova(s) anexada(s) "
           f"em tt_data_post_post_max.", flush=True)
