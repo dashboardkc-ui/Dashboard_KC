@@ -35,6 +35,12 @@ SHEET_DATA_PROFILE = "data_profile_post"
 SHEET_DATA_PROFILE_MAX = "data_profile_post_max"
 SHEET_DATA_COMMENTS = "data_comments_post"
 tz_br = pytz.timezone("America/Sao_Paulo")
+NUMERIC_COLS_MAX = [
+    "followers_count", "following_count", "total_posts_count",
+    "comment_count", "like_count", "play_count",
+]
+DATETIME_COLS_MAX = ["run_datetime", "taken_at", "first_extracted_at"]
+DATETIME_OUT_FMT = "%Y-%m-%d %H:%M:%S"
 # ==============================
 # GOOGLE SERVICES
 # ==============================
@@ -641,6 +647,99 @@ def update_data_profile_post_max(sheets_service):
     print(f"  data_profile_post_max: {updated} linha(s) atualizada(s), "
           f"{appended} nova(s) adicionada(s). Total: {len(df_out)} linha(s).")
 
+ 
+def _coerce_numeric_series(s):
+    """
+    Converte uma série para números.
+    - Remove separadores de milhar e espaços.
+    - Vazios/inválidos viram '' (célula em branco).
+    - Retorna int quando o valor é inteiro; senão float.
+    """
+    def conv(v):
+        raw = str(v).strip()
+        if raw == "" or raw.lower() in ("nan", "none"):
+            return ""
+        cleaned = raw.replace(",", "").replace(" ", "")
+        num = pd.to_numeric(cleaned, errors="coerce")
+        if pd.isna(num):
+            return ""  # não numérico -> deixa em branco
+        if float(num).is_integer():
+            return int(num)
+        return float(num)
+ 
+    return s.apply(conv)
+ 
+ 
+def _coerce_datetime_series(s):
+    """
+    Converte uma série para datetime e devolve string padronizada
+    (YYYY-MM-DD HH:MM:SS). Vazios/inválidos viram ''.
+    """
+    dt = pd.to_datetime(s, errors="coerce")
+    return dt.apply(lambda x: "" if pd.isna(x) else x.strftime(DATETIME_OUT_FMT))
+ 
+ 
+def normalize_data_profile_post_max_types(sheets_service):
+    """
+    Relê a versão FINAL de 'data_profile_post_max', normaliza os tipos das
+    colunas e reescreve a aba usando USER_ENTERED, para que o Google Sheets
+    grave números e datas de fato (e não texto).
+ 
+      - Numéricas: followers_count, following_count, total_posts_count,
+                   comment_count, like_count, play_count
+      - Datas:     run_datetime, taken_at, first_extracted_at
+    """
+    print("\n[POS-PROCESSO] Normalizando tipos em data_profile_post_max...")
+ 
+    resp = sheets_service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_DATA_PROFILE_ID,
+        range=f"{SHEET_DATA_PROFILE_MAX}!A:Z"
+    ).execute()
+    rows = resp.get("values", [])
+    if len(rows) <= 1:
+        print("  data_profile_post_max: vazia, nada a normalizar.")
+        return
+ 
+    header = rows[0]
+    ncols = len(header)
+    data_rows = [(r + [""] * ncols)[:ncols] for r in rows[1:]]
+    df = pd.DataFrame(data_rows, columns=header)
+ 
+    # Normaliza numéricos
+    num_done = []
+    for col in NUMERIC_COLS_MAX:
+        if col in df.columns:
+            df[col] = _coerce_numeric_series(df[col])
+            num_done.append(col)
+ 
+    # Normaliza datas
+    dt_done = []
+    for col in DATETIME_COLS_MAX:
+        if col in df.columns:
+            df[col] = _coerce_datetime_series(df[col])
+            dt_done.append(col)
+ 
+    # Preserva tipos: números como int/float, o resto como str
+    def cell(v):
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return v
+        return "" if v is None else str(v)
+ 
+    values = [header] + [[cell(v) for v in row] for row in df.itertuples(index=False, name=None)]
+ 
+    # USER_ENTERED faz o Sheets interpretar número/data em vez de texto
+    sheets_service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_DATA_PROFILE_ID,
+        range=f"{SHEET_DATA_PROFILE_MAX}!A1",
+        valueInputOption="USER_ENTERED",
+        body={"values": values}
+    ).execute()
+ 
+    print(f"  data_profile_post_max: tipos normalizados "
+          f"(numéricos: {num_done}; datas: {dt_done}). "
+          f"Total: {len(df)} linha(s).")
+ 
+
 def save_comments_to_sheets(sheets_service, df):
     df = df.fillna("")
     existing_data = sheets_service.spreadsheets().values().get(
@@ -755,7 +854,14 @@ def main():
         update_data_profile_post_max(sheets_service)
     except Exception as e:
         print(f"  ERRO ao atualizar data_profile_post_max: {e}")
-
+        
+    # PÓS-PROCESSO — normaliza os tipos da versão final de data_profile_post_max
+    try:
+        _, sheets_service = get_google_services()  # reconecta para evitar timeout
+        normalize_data_profile_post_max_types(sheets_service)
+    except Exception as e:
+        print(f"  ERRO ao normalizar tipos de data_profile_post_max: {e}")
+    
     print(f"\n{'=' * 60}")
     print("PIPELINE FINALIZADO COM SUCESSO")
     print(f"{'=' * 60}")
