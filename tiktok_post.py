@@ -103,7 +103,7 @@ def _update_row(service, spreadsheet_id, tab, row_number, values_list):
     ).execute()
  
  
-def _align_row(series, columns):
+
 NUMERIC_COLS = {"likes", "comment_count", "share_count", "views", "saves",
                 "download_count", "whatsapp_share_count", "forward_count",
                 "repost_count", "create_time"}
