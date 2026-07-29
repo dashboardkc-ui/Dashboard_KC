@@ -21,6 +21,7 @@ SHEET_TT_DATA_POST_ID     = "1CtvNfYM5Jp_kuriycsYMAMzCQYW0pFxqvGmOD0O4n80"
 TAB_INPUT            = "tiktok_profile"
 TAB_TT_DATA_COMMENTS = "tt_data_comments_post"
 TAB_TT_DATA_POST     = "tt_data_post_post"
+TAB_TT_DATA_POST_MAX = "tt_data_post_post_max"
 API_BASE         = "https://api.sociavault.com/v1/scrape/tiktok"
 POST_MAX_DAYS    = 14
 GEMINI_BATCH     = 20
@@ -72,6 +73,135 @@ def ensure_header(service, spreadsheet_id, tab, columns):
             valueInputOption="RAW",
             body={"values": [columns]}
         ).execute()
+def ts_to_datetime(value):
+    """Converte um unix timestamp (segundos) em string datetime UTC.
+    Retorna '' se o valor não for um número válido (ex.: vazio, '#VALUE!')."""
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    try:
+        ts = float(s)
+    except ValueError:
+        return ""
+    if ts <= 0:
+        return ""
+    try:
+        return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, OverflowError, OSError):
+        return ""
+ 
+ 
+def _update_row(service, spreadsheet_id, tab, row_number, values_list):
+    """Sobrescreve UMA linha inteira (a partir da coluna A) da aba destino."""
+    service.spreadsheets().values().update(
+        spreadsheetId=spreadsheet_id,
+        range=f"{tab}!A{row_number}",
+        valueInputOption="RAW",
+        body={"values": [values_list]}
+    ).execute()
+ 
+ 
+def _align_row(series, columns):
+    """Devolve os valores da Series na ordem exata de `columns` (como strings)."""
+    out = []
+    for c in columns:
+        v = series.get(c, "")
+        out.append("" if (v is None or pd.isna(v)) else str(v))
+    return out
+ 
+ 
+def atualizar_post_max(service):
+    """ETAPA 3 — mantém em tt_data_post_post_max a versão mais recente de cada post.
+ 
+    1. Lê tt_data_post_post.
+    2. Preenche 'Published date' com create_time (unix ts) em formato datetime.
+    3. Para cada aweme_id mantém só a linha com run_datetime mais recente.
+    4. Faz upsert em tt_data_post_post_max por aweme_id:
+         - se já existe e o run_datetime da origem é MAIOR -> substitui a linha;
+         - se não existe -> anexa como nova linha.
+    """
+    print("\n[ETAPA 3] Atualizando tab de máximos (tt_data_post_post_max)...", flush=True)
+ 
+    # --- 1. Ler origem -------------------------------------------------------
+    df_src = read_sheet(service, SHEET_TT_DATA_POST_ID, TAB_TT_DATA_POST)
+    if df_src.empty:
+        print("  tt_data_post_post vazia. Nada a fazer.", flush=True)
+        return
+    if "aweme_id" not in df_src.columns or "run_datetime" not in df_src.columns:
+        print(f"  ERRO: colunas obrigatórias ausentes em tt_data_post_post. "
+              f"Colunas: {list(df_src.columns)}", flush=True)
+        return
+ 
+    # --- 2. Preencher 'Published date' a partir de create_time ---------------
+    if "create_time" not in df_src.columns:
+        print("  ERRO: coluna 'create_time' não encontrada em tt_data_post_post.", flush=True)
+        return
+    df_src["Published date"] = df_src["create_time"].apply(ts_to_datetime)
+ 
+    # --- 3. Manter, por aweme_id, a linha com run_datetime mais recente ------
+    df_src["_run_dt"] = pd.to_datetime(df_src["run_datetime"], errors="coerce")
+    # na_position='first' garante que uma data inválida (NaT) nunca "vença"
+    # uma data válida ao usar keep='last'.
+    df_src = (
+        df_src.sort_values("_run_dt", na_position="first")
+              .drop_duplicates(subset="aweme_id", keep="last")
+    )
+    print(f"  {len(df_src)} aweme_id(s) únicos após deduplicação.", flush=True)
+ 
+    # --- 4. Ler destino (máximos) e garantir cabeçalho -----------------------
+    df_max = read_sheet(service, SHEET_TT_DATA_POST_ID, TAB_TT_DATA_POST_MAX)
+    if df_max.empty or not list(df_max.columns):
+        # aba vazia: usa como cabeçalho as colunas da origem (menos o helper)
+        max_cols = [c for c in df_src.columns if c != "_run_dt"]
+        ensure_header(service, SHEET_TT_DATA_POST_ID, TAB_TT_DATA_POST_MAX, max_cols)
+        df_max = pd.DataFrame(columns=max_cols)
+    else:
+        max_cols = list(df_max.columns)
+ 
+    # Índice aweme_id -> posição da linha (para saber o nº da linha na planilha)
+    max_pos = {}
+    max_rundt = {}
+    if "aweme_id" in df_max.columns:
+        rundt_series = pd.to_datetime(df_max.get("run_datetime"), errors="coerce")
+        for pos, (_, r) in enumerate(df_max.iterrows()):
+            aid = str(r["aweme_id"]).strip()
+            if aid:
+                max_pos[aid] = pos              # 0-based dentro dos dados
+                max_rundt[aid] = rundt_series.iloc[pos]
+ 
+    # --- 4a/4b. Upsert -------------------------------------------------------
+    novos = []          # linhas a anexar
+    atualizados = 0
+    for _, srow in df_src.iterrows():
+        aid = str(srow["aweme_id"]).strip()
+        if not aid:
+            continue
+        values = _align_row(srow, max_cols)
+ 
+        if aid in max_pos:
+            # já existe -> só atualiza se a origem for mais recente
+            src_dt = srow["_run_dt"]
+            dst_dt = max_rundt.get(aid)
+            mais_recente = (
+                pd.notna(src_dt) and (pd.isna(dst_dt) or src_dt > dst_dt)
+            )
+            if mais_recente:
+                sheet_row = max_pos[aid] + 2      # +1 header, +1 base-1
+                _update_row(service, SHEET_TT_DATA_POST_ID,
+                            TAB_TT_DATA_POST_MAX, sheet_row, values)
+                atualizados += 1
+        else:
+            # não existe -> anexa
+            novos.append(values)
+ 
+    if novos:
+        df_novos = pd.DataFrame(novos, columns=max_cols)
+        append_to_sheet(service, SHEET_TT_DATA_POST_ID, TAB_TT_DATA_POST_MAX, df_novos)
+ 
+    print(f"  {atualizados} linha(s) atualizada(s) e {len(novos)} nova(s) anexada(s) "
+          f"em tt_data_post_post_max.", flush=True)
 # ==============================
 # SOCIAVAULT HELPERS
 # ==============================
@@ -456,6 +586,11 @@ def main():
         except Exception as e:
             print(f"  Erro ao processar vídeo {post['video_id']}: {e}. Pulando.", flush=True)
             continue
+        try:
+            atualizar_post_max(service)
+        except Exception as e:
+            print(f"  Erro na ETAPA 3 (post_max): {e}", flush=True)
+            
     print(f"\n=== Pipeline finalizado. Total de comentários salvos: {total_salvos} ===", flush=True)
 if __name__ == "__main__":
     main()
