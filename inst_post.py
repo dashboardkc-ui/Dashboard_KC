@@ -67,7 +67,7 @@ def extract_shortcode_from_url(url):
     """
     if not url or not isinstance(url, str):
         return None
-    match = re.search(r"instagram\.com/(?:p|reel)/([A-Za-z0-9_\-]+)", url.strip())
+    match = re.search(r"instagram\.com/(?:p|reels?)/([A-Za-z0-9_\-]+)", url.strip())
     if match:
         return match.group(1)
     return None
