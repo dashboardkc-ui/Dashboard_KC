@@ -12,38 +12,38 @@ from google.genai import types
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 import pytz
-
+ 
 # Força flush imediato em todos os prints
 _original_print = builtins.print
 def print(*args, **kwargs):
     kwargs["flush"] = True
     _original_print(*args, **kwargs)
-
+ 
 API_TIMEOUT = 60  # segundos
-
+ 
 # ==============================
 # CONFIGURAÇÕES
 # ==============================
 SOCIA_API_KEY = os.environ.get("SOCIAVAULT_API_KEY")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
+ 
 POSTS_LIMIT = 5
 COMMENTS_LIMIT = 100
 BATCH_SIZE = 20
 POST_EXPIRY_DAYS = 14
-
+ 
 # Spreadsheet IDs
 SPREADSHEET_PROFILES_ID = "1VK7_oyA3boJaudPaAiwk7xYl6sxReed63eOYBP9ahxo"
 SPREADSHEET_DATA_PROFILE_ID = "1S86wWk2yO525qC0JQ6IZ6G5gFCYhzzn4Ny6TwZC2E98"
 SPREADSHEET_DATA_COMMENTS_ID = "1orR6-MXGNajad6q5IP1dakAPQMM5lyUMX-718YbQzhI"
-
+ 
 # Sheet names
 SHEET_PROFILES = "instagram_profile"
 SHEET_DATA_PROFILE = "data_profile"
 SHEET_DATA_COMMENTS = "data_comments"
-
+ 
 tz_br = pytz.timezone("America/Sao_Paulo")
-
+ 
 # ==============================
 # GOOGLE SERVICES
 # ==============================
@@ -59,7 +59,7 @@ def get_google_services():
     drive_service = build("drive", "v3", credentials=creds)
     sheets_service = build("sheets", "v4", credentials=creds)
     return drive_service, sheets_service
-
+ 
 # ==============================
 # ETAPA 1 — LER PERFIS
 # ==============================
@@ -93,7 +93,7 @@ def read_profiles(sheets_service):
             profiles_unique.append(p)
     print(f"Após deduplicação: {len(profiles_unique)} perfil(is) único(s): {[p['profile'] for p in profiles_unique]}")
     return profiles_unique
-
+ 
 def fetch_profile(handle):
     url = "https://api.sociavault.com/v1/scrape/instagram/profile"
     headers = {"X-API-Key": SOCIA_API_KEY}
@@ -115,7 +115,7 @@ def fetch_profile(handle):
         "following_count": user.get("edge_follow", {}).get("count", ""),
         "total_posts_count": user.get("edge_owner_to_timeline_media", {}).get("count", "")
     }
-
+ 
 # ==============================
 # ETAPA 2 — EXTRAIR POSTS
 # ==============================
@@ -195,7 +195,7 @@ def fetch_posts(handle):
     df = df.fillna("")
     print(f"  Posts extraídos: {len(df)}")
     return df
-
+ 
 def get_saved_post_codes(sheets_service):
     """Retorna dict {code: first_extracted_at} já salvos no data_profile."""
     try:
@@ -222,7 +222,7 @@ def get_saved_post_codes(sheets_service):
     except Exception as e:
         print(f"  Aviso ao ler data_profile: {e}")
         return {}
-
+ 
 def get_saved_profile_handles(sheets_service):
     """Retorna set de handles (username) que já têm posts salvos no data_profile,
     ou seja, perfis cuja Etapa 3 (post-info/comentários) já rodou pelo menos uma vez."""
@@ -248,7 +248,39 @@ def get_saved_profile_handles(sheets_service):
     except Exception as e:
         print(f"  Aviso ao ler handles de data_profile: {e}")
         return set()
-
+ 
+# ==============================
+# ETAPA 0 — FILTRO INICIAL (perfis faltantes)
+# ==============================
+def filtrar_perfis_faltantes(sheets_service, profiles):
+    """
+    Compara os usernames de instagram_profile (profiles) com os já presentes
+    em data_profile e retorna apenas os que estão faltando lá.
+ 
+    1. profiles vem de read_profiles() -> usernames únicos de instagram_profile
+    2. get_saved_profile_handles() -> usernames únicos já presentes em data_profile
+    3. Diferença: em instagram_profile mas NÃO em data_profile
+    4. Informa quantos faltantes foram encontrados
+    5. Retorna apenas os faltantes (para o resto do processo)
+    """
+    # usernames únicos já presentes em data_profile (já vem normalizado: lstrip('@').lower())
+    handles_com_dados = get_saved_profile_handles(sheets_service)
+ 
+    missing = []
+    seen = set()
+    for p in profiles:
+        norm = p["profile"].strip().lstrip("@").lower()
+        if norm and norm not in handles_com_dados and norm not in seen:
+            seen.add(norm)
+            missing.append(p)
+ 
+    print(f"  Perfis em instagram_profile: {len(profiles)}")
+    print(f"  Perfis já presentes em data_profile: {len(handles_com_dados)}")
+    print(f"  Perfis FALTANTES encontrados: {len(missing)}")
+    if missing:
+        print(f"  Serão processados: {[p['profile'] for p in missing]}")
+    return missing
+ 
 def save_posts_to_sheets(sheets_service, df):
     """Salva todos os posts sempre, criando snapshot histórico por run_datetime."""
     df = df.fillna("")
@@ -276,7 +308,7 @@ def save_posts_to_sheets(sheets_service, df):
             body={"values": append_values}
         ).execute()
         print(f"  data_profile: {len(append_values)} linhas adicionadas (snapshot {df['run_datetime'].iloc[0]}).")
-
+ 
 # ==============================
 # ETAPA 3 — POST INFO (comentários + descrição)
 # ==============================
@@ -291,7 +323,7 @@ def is_post_expired(first_extracted_at_str):
         return (hoje - first_extracted).days > POST_EXPIRY_DAYS
     except Exception:
         return False
-
+ 
 def fetch_post_info(shortcode):
     """
     Chama o endpoint /post-info e retorna:
@@ -380,7 +412,7 @@ def fetch_post_info(shortcode):
         page += 1
         time.sleep(1)
     return caption, all_comments
-
+ 
 def normalize_comments(comment_nodes, page):
     comments = []
     for idx, node in enumerate(comment_nodes, start=1):
@@ -389,7 +421,7 @@ def normalize_comments(comment_nodes, page):
         node["_custom_comment_id"] = f"{page}_{idx}"
         comments.append(node)
     return comments
-
+ 
 def has_emoji(text):
     emoji_pattern = re.compile(
         "["
@@ -404,7 +436,7 @@ def has_emoji(text):
         flags=re.UNICODE,
     )
     return bool(emoji_pattern.search(text))
-
+ 
 def get_saved_comment_ids(sheets_service, post_url):
     try:
         result = sheets_service.spreadsheets().values().get(
@@ -429,7 +461,7 @@ def get_saved_comment_ids(sheets_service, post_url):
     except Exception as e:
         print(f"    Aviso ao ler data_comments: {e}")
         return set()
-
+ 
 def comments_to_dataframe(comments, post_url, perfil, saved_ids):
     rows = []
     skipped = 0
@@ -465,7 +497,7 @@ def comments_to_dataframe(comments, post_url, perfil, saved_ids):
     df["text_debug"] = df["text"].apply(repr)
     df["tem_emoji"] = df["text"].apply(has_emoji)
     return df
-
+ 
 # ==============================
 # CLASSIFICAÇÃO GEMINI
 # ==============================
@@ -474,7 +506,7 @@ def extrair_retry_seconds(error_message):
     if match:
         return float(match.group(1)) + 2
     return 60
-
+ 
 def classificar_lote_comentarios(comentarios, tentativa=1, max_tentativas=2):
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
@@ -532,7 +564,7 @@ Comentários para análise:
                 print(f"    Máximo de tentativas atingido para este lote.")
                 raise
         raise
-
+ 
 def classificar_dataframe(df):
     resultados = []
     print(f"    Classificando {len(df)} comentários...")
@@ -560,7 +592,7 @@ def classificar_dataframe(df):
     df = df.drop(columns=["sentimento_nps", "justificativa"], errors="ignore")
     df = df.merge(df_result, on="Id Comentário", how="left")
     return df
-
+ 
 def save_comments_to_sheets(sheets_service, df):
     df = df.fillna("")
     existing_data = sheets_service.spreadsheets().values().get(
@@ -587,7 +619,7 @@ def save_comments_to_sheets(sheets_service, df):
             body={"values": append_values}
         ).execute()
         print(f"    data_comments: {len(append_values)} linhas adicionadas.")
-
+ 
 # ==============================
 # EXECUÇÃO PRINCIPAL
 # ==============================
@@ -610,12 +642,21 @@ def main():
     print("\n[CONFIG] Inicializando Google Services...")
     drive_service, sheets_service = get_google_services()
     print("  Google Services OK")
+ 
     # ETAPA 1 — Ler perfis
     print("\n[ETAPA 1] Lendo perfis...")
     profiles = read_profiles(sheets_service)
     if not profiles:
         print("Nenhum perfil para processar. Encerrando.")
         return
+ 
+    # ETAPA 0 — Filtro inicial: só perfis presentes em instagram_profile mas AUSENTES em data_profile
+    print("\n[FILTRO] Selecionando perfis ausentes em data_profile...")
+    profiles = filtrar_perfis_faltantes(sheets_service, profiles)
+    if not profiles:
+        print("Nenhum perfil faltante — todos já estão em data_profile. Encerrando.")
+        return
+ 
     # Carrega first_extracted_at de cada code
     saved_post_codes = get_saved_post_codes(sheets_service)
     print(f"Codes já conhecidos no data_profile: {len(saved_post_codes)}")
@@ -694,6 +735,9 @@ def main():
     print(f"\n{'=' * 60}")
     print("PIPELINE FINALIZADO COM SUCESSO")
     print(f"{'=' * 60}")
-
+ 
 if __name__ == "__main__":
     main()
+ 
+
+
