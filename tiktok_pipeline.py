@@ -150,6 +150,9 @@ def classify_comments_batch(client, comments_text):
 # ==============================
 # ETAPA 1 — LER PERFIS
 # ==============================
+def _norm_username(u):
+    return str(u).strip().lstrip("@").lower()
+
 def ler_perfis(service):
     print("[ETAPA 1] Lendo perfis do tiktok_profile...", flush=True)
     df = read_sheet(service, SHEET_TIKTOK_PROFILE_ID, TAB_TIKTOK_PROFILE)
@@ -161,16 +164,38 @@ def ler_perfis(service):
         print(f"  Coluna 'Username' não encontrada. Colunas disponíveis: {list(df.columns)}", flush=True)
         return []
 
-    perfis = (
-        df[["username"]]
-        .rename(columns={"username": "profile"})
-        .dropna(subset=["profile"])
-        .assign(date_added="")
-        .drop_duplicates(subset=["profile"])  # ← evita processar o mesmo perfil mais de uma vez dentro da própria lista
-        .to_dict("records")
-    )
-    perfis = [p for p in perfis if p["profile"].strip()]
-    print(f"  {len(perfis)} perfil(is) encontrado(s).", flush=True)
+    # 1) usernames únicos do input (tiktok_profile), normalizados
+    input_usernames = {
+        _norm_username(u)
+        for u in df["username"].astype(str).tolist()
+        if _norm_username(u)
+    }
+    print(f"  {len(input_usernames)} perfil(is) único(s) em '{TAB_TIKTOK_PROFILE}'.", flush=True)
+
+    # 2) usernames únicos já processados (tt_data_profile), normalizados
+    done_df = read_sheet(service, SHEET_TT_DATA_PROFILE_ID, TAB_TT_DATA_PROFILE)
+    done_usernames = set()
+    if not done_df.empty:
+        done_df.columns = [c.strip().lower() for c in done_df.columns]
+        if "username" in done_df.columns:
+            done_usernames = {
+                _norm_username(u)
+                for u in done_df["username"].astype(str).tolist()
+                if _norm_username(u)
+            }
+    print(f"  {len(done_usernames)} perfil(is) já presente(s) em '{TAB_TT_DATA_PROFILE}'.", flush=True)
+
+    # 3) presentes no input mas ausentes no tt_data_profile
+    missing_usernames = input_usernames - done_usernames
+
+    # 4) informa quantos faltam
+    print(f"  {len(missing_usernames)} perfil(is) novo(s) a processar.", flush=True)
+    if not missing_usernames:
+        print("  Nenhum perfil novo. Nada a fazer.", flush=True)
+        return []
+
+    # 5) monta a lista apenas com os que faltam
+    perfis = [{"profile": u, "date_added": ""} for u in sorted(missing_usernames)]
     return perfis
 
 
