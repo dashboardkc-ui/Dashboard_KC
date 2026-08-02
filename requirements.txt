@@ -6,3 +6,4 @@ google-genai
 pytz
 openpyxl
 gspread
+gspread_dataframe
