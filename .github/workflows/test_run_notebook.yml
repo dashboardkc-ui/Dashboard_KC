@@ -9,7 +9,7 @@ jobs:
   rodar:
     runs-on: ubuntu-latest
 
-    # Required permissions to push the updated notebook back to the repo
+    # Required permissions to commit and push the output back to your repo
     permissions:
       contents: write
 
@@ -27,6 +27,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install papermill jupyter
           pip install -r requirements.txt
+
+      # DEBUG FIX: Prints all files in root to verify the notebook location
+      - name: Debug - List files in repository
+        run: ls -la
 
       - name: Executar notebook
         env:
