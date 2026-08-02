@@ -34,10 +34,10 @@ jobs:
 
       - name: Execute Notebook
         run: |
-          papermill my_notebook.ipynb executed_notebook.ipynb
+          papermill notebook_test.ipynb executed_notebook_test.ipynb
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "auto: run notebook and update outputs [skip ci]"
-          file_pattern: "notebook_test.ipynb"
+          file_pattern: "executed_notebook_test.ipynb"
