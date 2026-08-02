@@ -25,6 +25,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 COMMENTS_LIMIT = 100
 BATCH_SIZE = 20
 POST_EXPIRY_DAYS = 14
+MAX_PAGES = 20
 # Spreadsheet IDs
 SPREADSHEET_PROFILES_ID = "1VK7_oyA3boJaudPaAiwk7xYl6sxReed63eOYBP9ahxo"
 SPREADSHEET_DATA_PROFILE_ID = "1TvqNwg2GeCpBRNKBw87-qcbsG1yK2BaI8UQEbbZgCBw"
@@ -221,6 +222,11 @@ def fetch_post_info(shortcode):
     page = 1
     seen_ids = set()  # controle de IDs já vistos para detectar páginas duplicadas
     while True:
+        # Limite de páginas: encerra antes de buscar além do máximo permitido
+        if page > MAX_PAGES:
+            print(f"    Limite de {MAX_PAGES} páginas atingido, encerrando paginação.")
+            break
+        
         post_url_param = f"https://www.instagram.com/p/{shortcode}/"
         params = {"url": post_url_param}
         if cursor:
