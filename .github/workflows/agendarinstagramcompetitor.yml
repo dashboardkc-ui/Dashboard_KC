@@ -1,8 +1,6 @@
 name: Script - Instagram competitors
 
 on:
-  schedule:
-    - cron: '00 8 * * *'  # 13h30 horário de Brasília
   workflow_dispatch:
 
 jobs:
