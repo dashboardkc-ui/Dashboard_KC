@@ -2,7 +2,7 @@ name: Script - Instagram Post
 
 on:
   schedule:
-    - cron: '30 3 * * *'  # 13h30 horário de Brasília
+    - cron: '30 0 * * *'  # 13h30 horário de Brasília
   workflow_dispatch:
 
 jobs:
