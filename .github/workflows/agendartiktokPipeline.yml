@@ -2,7 +2,7 @@ name: Script - TikTok Profile
 
 on:
   schedule:
-    - cron: '30 6 * * *'  # 13h30 horário de Brasília
+    - cron: '37 6 * * *'  # 13h30 horário de Brasília
   workflow_dispatch:
 
 jobs:
