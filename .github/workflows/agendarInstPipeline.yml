@@ -2,7 +2,7 @@ name: Script - Instagram Profile
 
 on:
   schedule:
-    - cron: '00 2 * * *'  # 13h30 horário de Brasília
+    - cron: '07 2 * * *'  # 13h30 horário de Brasília
   workflow_dispatch:
 
 jobs:
