@@ -74,6 +74,12 @@ BASELINE_COLUMNS_MAP = {
     "Post Likes And Reactions": "Baseline Post Likes And Reactions",
     "Post Comments / X Replies (SUM)": "Baseline Post Comments",
 }
+# --- min_views_boost (limite mínimo de views por Account para permitir Boost) ---
+MIN_VIEWS_SPREADSHEET_ID = "1HwNv2AJVgULBNmZbqiPYDzZY7zPNLKhZz1DLtGJkOpM"
+MIN_VIEWS_SHEET_RANGE = "Sheet1!A:Z"
+MIN_VIEWS_COLUMN = "min_views_boost"
+MIN_DAYS_FOR_BOOST = 3
+
 # --- Log de execução (data de início da automação) ---
 RUN_LOG_SPREADSHEET_ID = "17_D9mcA3ZvwrHZevC-eCCBJjg47q2kIKi3trLeD6ZiA"
 RUN_LOG_SHEET_NAME = "Run_Datetime"
@@ -220,14 +226,60 @@ def read_baseline(sheets_service):
         )/100
     print(f"Baseline lido: {len(baseline)} linhas.")
     return baseline
+    
+def read_min_views_boost(sheets_service):
+    """
+    Lê a planilha de min_views_boost e retorna um DataFrame com apenas as colunas
+    'Account' e 'min_views_boost'. Usada num left join por 'Account' para trazer,
+    para cada conta, o mínimo de views necessário para permitir um Boost.
+    """
+    result = sheets_service.spreadsheets().values().get(
+        spreadsheetId=MIN_VIEWS_SPREADSHEET_ID,
+        range=MIN_VIEWS_SHEET_RANGE,
+    ).execute()
+    rows = result.get("values", [])
+    if not rows:
+        raise RuntimeError("Planilha de min_views_boost está vazia.")
+    headers = rows[0]
+    data_rows = rows[1:]
+    data_rows = [r + [""] * (len(headers) - len(r)) for r in data_rows]
+    min_views = pd.DataFrame(data_rows, columns=headers)
+    needed_cols = ["Account", MIN_VIEWS_COLUMN]
+    missing = [c for c in needed_cols if c not in min_views.columns]
+    if missing:
+        raise RuntimeError(
+            f"Colunas faltando na planilha de min_views_boost: {missing}. "
+            f"Colunas disponíveis: {list(min_views.columns)}"
+        )
+    min_views = min_views[needed_cols].copy()
+    # Converte o limite para número (aceitando ',' como separador decimal).
+    min_views[MIN_VIEWS_COLUMN] = pd.to_numeric(
+        min_views[MIN_VIEWS_COLUMN].astype(str).str.replace(",", "."),
+        errors="coerce",
+    ).fillna(0)
+    # Evita multiplicar linhas no merge caso a mesma Account apareça repetida.
+    min_views["Account"] = min_views["Account"].astype(str).str.strip()
+    min_views = min_views.drop_duplicates(subset="Account").copy()
+    print(f"min_views_boost lido: {len(min_views)} linhas.")
+    return min_views
+    
 def classify_boost(row):
-    if row["Delta Eng. Rate (p.p.)"] > 0 and row["Delta Neg. Sent. (p.p.)"] <= 0:
+    # Prioridade 1: Stories nunca entram na regra de Boost.
+    if row["Outbound Message Category"] == "Story":
+        return "Not Applies"
+    boost = (
+        row["Delta Eng. Rate (p.p.)"] > 0
+        and row["Delta Neg. Sent. (p.p.)"] <= 0
+        and row["Video Views (SUM)"] >= row[MIN_VIEWS_COLUMN]
+        and row["Days Since Published"] >= MIN_DAYS_FOR_BOOST
+    )
+    if boost:
         return "Boost"
     elif row["Delta Eng. Rate (p.p.)"] > 0 and row["Delta Neg. Sent. (p.p.)"] > 0:
         return "Review"
     else:
         return "No Boost"
-def read_organic_sheet(local_path, baseline_df):
+def read_organic_sheet(local_path, baseline_df, min_views_df):
     df = pd.read_excel(local_path, sheet_name=SOURCE_TAB, header=HEADER_SKIPROWS)
     missing_needed = [c for c in RAW_COLUMNS_NEEDED if c not in df.columns]
     if missing_needed:
@@ -307,7 +359,23 @@ def read_organic_sheet(local_path, baseline_df):
     df = df.merge(baseline_df, on="Concatenate", how="left")
     df["Delta Eng. Rate (p.p.)"] = df["Engagement Rate"] - df["Baseline Engagement Rate"]
     df["Delta Neg. Sent. (p.p.)"] = df["Sent. Negativo (%)"] - df["Baseline Neg. Com."]
+
+    # Left join min_views_boost por Account (sem match => 0), antes de classify.
+    df["Account"] = df["Account"].astype(str).str.strip()
+    df = df.merge(min_views_df, on="Account", how="left")
+    df[MIN_VIEWS_COLUMN] = pd.to_numeric(df[MIN_VIEWS_COLUMN], errors="coerce").fillna(0)
+
+    # Dias desde a publicação (data atual - Published Date), antes de virar string.
+    published_dt = pd.to_datetime(df["Published Date"], errors="coerce")
+    if getattr(published_dt.dt, "tz", None) is not None:
+        published_dt = published_dt.dt.tz_localize(None)
+    now_naive = datetime.now(tz_br).replace(tzinfo=None)
+    df["Days Since Published"] = (pd.Timestamp(now_naive) - published_dt).dt.days
+
     df["Accionable"] = df.apply(classify_boost, axis=1)
+
+    # Remove colunas auxiliares para não alterar o schema da planilha de destino.
+    df = df.drop(columns=[MIN_VIEWS_COLUMN, "Days Since Published"])
     if "Published Date" in df.columns:
         df["Published Date"] = pd.to_datetime(df["Published Date"]).dt.strftime("%Y-%m-%d %H:%M:%S")
     df = df.fillna("")
@@ -436,7 +504,8 @@ def main():
     local_path = f"/tmp/{file_name}"
     download_file(drive_service, file_id, local_path)
     baseline_df = read_baseline(sheets_service)
-    organic_df = read_organic_sheet(local_path, baseline_df)
+    min_views_df = read_min_views_boost(sheets_service)
+    organic_df = read_organic_sheet(local_path, baseline_df, min_views_df)
     upsert_rows(sheets_service, organic_df)
     # --- Etapa 5: registra a data/hora de conclusão da automação, só após sucesso total ---
     run_end_str = datetime.now(tz_br).strftime("%Y-%m-%d %H:%M:%S")
