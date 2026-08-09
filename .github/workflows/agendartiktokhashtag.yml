@@ -1,8 +1,8 @@
 name: Script - TikTok hashtag
 
 on:
-  schedule:
-  - cron: '00 10 * * 1'  # 8h UTC (13h30... na verdade 05h Brasília) — toda segunda-feira
+#  schedule:
+#  - cron: '00 10 * * 1'  # 8h UTC (13h30... na verdade 05h Brasília) — toda segunda-feira
   workflow_dispatch:
 
 jobs:
