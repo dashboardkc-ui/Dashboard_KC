@@ -1,4 +1,4 @@
-name: agendarConsolidateInfuencers
+name: Notebooks - ConsolidateInfuencers
 
 on:
   workflow_dispatch:
