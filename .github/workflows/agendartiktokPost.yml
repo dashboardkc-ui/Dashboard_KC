@@ -1,8 +1,8 @@
 name: Script - TikTok Post
 
 on:
-  schedule:
-    - cron: '07 5 * * *'  # 13h30 horário de Brasília
+#  schedule:
+#    - cron: '07 5 * * *'  # 13h30 horário de Brasília
   workflow_dispatch:
 
 jobs:
