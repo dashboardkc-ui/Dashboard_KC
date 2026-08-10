@@ -118,7 +118,7 @@ def _row_to_sheet_values(values):
 # GOOGLE SERVICES
 # ==============================
 def get_google_services():
-    creds_json = json.loads(os.environ.get("GDRIVE_CREDENTIALS"))
+    creds_json = json.loads(os.environ.get("GDRIVE_CREDENTIALS_KC"))
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
