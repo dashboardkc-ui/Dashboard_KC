@@ -21,7 +21,7 @@ API_TIMEOUT = 60  # segundos
 # CONFIGURAÇÕES
 # ==============================
 SOCIA_API_KEY = os.environ.get("SOCIAVAULT_API_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_API_KEY_KC = os.environ.get("GEMINI_API_KEY_KC")
 COMMENTS_LIMIT = 100
 BATCH_SIZE = 20
 POST_EXPIRY_DAYS = 14
@@ -417,7 +417,7 @@ def extrair_retry_seconds(error_message):
         return float(match.group(1)) + 2
     return 60
 def classificar_lote_comentarios(comentarios, tentativa=1, max_tentativas=2):
-    client = genai.Client(api_key=GEMINI_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY_KC)
     prompt = f"""
 Você é um especialista em análise de sentimentos para redes sociais.
 Sua tarefa é classificar comentários em 'promotor', 'neutro' ou 'detrator'.
@@ -781,7 +781,7 @@ def main():
     print("=" * 60)
     print("\n[CONFIG] Verificando variáveis de ambiente...")
     missing = []
-    for var in ["SOCIAVAULT_API_KEY", "GEMINI_API_KEY", "GDRIVE_CREDENTIALS"]:
+    for var in ["SOCIAVAULT_API_KEY", "GEMINI_API_KEY_KC", "GDRIVE_CREDENTIALS"]:
         val = os.environ.get(var)
         if not val:
             missing.append(var)
