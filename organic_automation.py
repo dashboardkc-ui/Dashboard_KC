@@ -493,7 +493,7 @@ def main():
     print("=" * 60)
     print("INICIANDO PIPELINE COMPLETO")
     print("=" * 60)
-    missing = [v for v in ["GDRIVE_CREDENTIALS"] if not os.environ.get(v)]
+    missing = [v for v in ["GDRIVE_CREDENTIALS_KC"] if not os.environ.get(v)]
     if missing:
         print(f"Variáveis de ambiente faltando: {missing}. Encerrando.")
         sys.exit(1)
