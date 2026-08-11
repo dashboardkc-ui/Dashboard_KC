@@ -25,7 +25,7 @@ API_TIMEOUT = 60  # segundos
 # CONFIGURAÇÕES
 # ==============================
 SOCIA_API_KEY = os.environ.get("SOCIAVAULT_API_KEY")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY_KC")
  
 POSTS_LIMIT = 5
 COMMENTS_LIMIT = 100
@@ -543,7 +543,7 @@ Comentários para análise:
     }
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.1-flash-lite",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -629,7 +629,7 @@ def main():
     print("=" * 60)
     print("\n[CONFIG] Verificando variáveis de ambiente...")
     missing = []
-    for var in ["SOCIAVAULT_API_KEY", "GEMINI_API_KEY", "GDRIVE_CREDENTIALS_KC"]:
+    for var in ["SOCIAVAULT_API_KEY", "GEMINI_API_KEY_KC", "GDRIVE_CREDENTIALS_KC"]:
         val = os.environ.get(var)
         if not val:
             missing.append(var)
