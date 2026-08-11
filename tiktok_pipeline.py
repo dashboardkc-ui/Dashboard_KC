@@ -14,7 +14,7 @@ from googleapiclient.discovery import build
 # ==============================
 SOCIAVAULT_API_KEY = os.environ.get("SOCIAVAULT_API_KEY", "")
 GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY", "")
-GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS", "")
+GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS_KC", "")
 
 SHEET_TIKTOK_PROFILE_ID   = "1947Wx86ZtNWQSaqcYVSXv_3WLvIA0p6u_Ol1DZ8GmX8"
 SHEET_TT_DATA_PROFILE_ID  = "1roDSHeO9-O_DKfTwUKAQv3euCUyfipKq_KxkpKpf3r4"
