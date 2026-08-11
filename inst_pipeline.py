@@ -48,7 +48,7 @@ tz_br = pytz.timezone("America/Sao_Paulo")
 # GOOGLE SERVICES
 # ==============================
 def get_google_services():
-    creds_json = json.loads(os.environ.get("GDRIVE_CREDENTIALS"))
+    creds_json = json.loads(os.environ.get("GDRIVE_CREDENTIALS_KC"))
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -629,7 +629,7 @@ def main():
     print("=" * 60)
     print("\n[CONFIG] Verificando variáveis de ambiente...")
     missing = []
-    for var in ["SOCIAVAULT_API_KEY", "GEMINI_API_KEY", "GDRIVE_CREDENTIALS"]:
+    for var in ["SOCIAVAULT_API_KEY", "GEMINI_API_KEY", "GDRIVE_CREDENTIALS_KC"]:
         val = os.environ.get(var)
         if not val:
             missing.append(var)
