@@ -25,5 +25,5 @@ jobs:
         env:
           SOCIAVAULT_API_KEY: ${{ secrets.SOCIAVAULT_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GDRIVE_CREDENTIALS: ${{ secrets.GDRIVE_CREDENTIALS_KC }}
+          GDRIVE_CREDENTIALS_KC: ${{ secrets.GDRIVE_CREDENTIALS_KC }}
         run: python tiktok_post.py
