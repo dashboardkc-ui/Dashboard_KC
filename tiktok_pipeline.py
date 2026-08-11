@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 # CONFIG
 # ==============================
 SOCIAVAULT_API_KEY = os.environ.get("SOCIAVAULT_API_KEY", "")
-GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY_KC", "")
 GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS_KC", "")
 
 SHEET_TIKTOK_PROFILE_ID   = "1947Wx86ZtNWQSaqcYVSXv_3WLvIA0p6u_Ol1DZ8GmX8"
@@ -126,7 +126,7 @@ def classify_comments_batch(client, comments_text):
     for attempt in range(1, GEMINI_MAX_RETRY + 1):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite",
                 contents=prompt
             )
             raw = response.text.strip()
