@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 # CONFIG
 # ==============================
 SOCIAVAULT_API_KEY = os.environ.get("SOCIAVAULT_API_KEY", "")
-GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY_KC", "")
 GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS_KC", "")
 SHEET_INPUT_ID            = "1947Wx86ZtNWQSaqcYVSXv_3WLvIA0p6u_Ol1DZ8GmX8"
 SHEET_TT_DATA_COMMENTS_ID = "1BD4OoVfXZHI6p5kJ6KmLAMsPfpQ86MjdNdVoPPWhgkg"
@@ -24,8 +24,8 @@ TAB_TT_DATA_POST     = "tt_data_post_post"
 TAB_TT_DATA_POST_MAX = "tt_data_post_post_max"
 API_BASE         = "https://api.sociavault.com/v1/scrape/tiktok"
 POST_MAX_DAYS    = 14
-GEMINI_BATCH     = 20
-GEMINI_MAX_RETRY = 3
+_BATCH     = 20
+_MAX_RETRY = 3
 COMMENTS_LIMIT   = 100
 # ==============================
 # GOOGLE SHEETS HELPERS
@@ -306,7 +306,7 @@ def sv_get(endpoint, params, timeout=60):
         )
 
 # ==============================
-# GEMINI HELPERS
+#  HELPERS
 # ==============================
 def extrair_retry_seconds(error_str):
     match = re.search(r"retry in ([0-9.]+)s", error_str)
@@ -315,7 +315,7 @@ def extrair_retry_seconds(error_str):
     return 60.0
 def _extract_response_text(response):
     """FIX 2: nunca chamar json.loads direto em response.text.
-    Valida se o Gemini realmente retornou conteúdo e, se não, explica o porquê."""
+    Valida se o  realmente retornou conteúdo e, se não, explica o porquê."""
     text = (response.text or "").strip() if response is not None else ""
     if text:
         return text
@@ -326,7 +326,7 @@ def _extract_response_text(response):
     if getattr(response, "prompt_feedback", None):
         block_reason = getattr(response.prompt_feedback, "block_reason", None)
     raise ValueError(
-        f"Gemini retornou resposta vazia (finish_reason={finish_reason}, "
+        f" retornou resposta vazia (finish_reason={finish_reason}, "
         f"block_reason={block_reason})"
     )
 
@@ -373,7 +373,7 @@ Comentários para análise:
     for attempt in range(1, GEMINI_MAX_RETRY + 1):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.1-flash-lite",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
