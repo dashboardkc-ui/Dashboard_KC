@@ -14,7 +14,7 @@ from googleapiclient.discovery import build
 # ==============================
 SOCIAVAULT_API_KEY = os.environ.get("SOCIAVAULT_API_KEY", "")
 GEMINI_API_KEY     = os.environ.get("GEMINI_API_KEY", "")
-GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS", "")
+GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS_KC", "")
 SHEET_INPUT_ID            = "1947Wx86ZtNWQSaqcYVSXv_3WLvIA0p6u_Ol1DZ8GmX8"
 SHEET_TT_DATA_COMMENTS_ID = "1BD4OoVfXZHI6p5kJ6KmLAMsPfpQ86MjdNdVoPPWhgkg"
 SHEET_TT_DATA_POST_ID     = "1CtvNfYM5Jp_kuriycsYMAMzCQYW0pFxqvGmOD0O4n80"
