@@ -10,7 +10,7 @@ from googleapiclient.discovery import build
 # CONFIG
 # ==============================
 SOCIAVAULT_API_KEY = os.environ.get("SOCIAVAULT_API_KEY", "")
-GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS", "")
+GDRIVE_CREDENTIALS = os.environ.get("GDRIVE_CREDENTIALS_KC", "")
 SHEET_TIKTOK_PROFILE_ID   = "1cn68TA8_ajbbIOaMofE_7-Vc4_BWfQRMHehrO6SB_Q4"
 SHEET_TT_DATA_POST_ID     = "1cn68TA8_ajbbIOaMofE_7-Vc4_BWfQRMHehrO6SB_Q4"
 TAB_TIKTOK_PROFILE   = "tt_competitors_data"
